@@ -46,16 +46,9 @@ interface CustomProperty {
   isRequired: boolean;
 }
 
-const INITIAL_DISCOUNTS: DiscountRule[] = [
-  { id: 'disc-1', name: 'Descuento Almacén por Volumen', category: 'Almacén', discountPercent: 10, minUnits: 6, isActive: true },
-  { id: 'disc-2', name: 'Promoción Bebidas Fin de Semana', category: 'Bebidas', discountPercent: 15, minUnits: 3, isActive: true }
-];
+const INITIAL_DISCOUNTS: DiscountRule[] = [];
 
-const INITIAL_PROPERTIES: CustomProperty[] = [
-  { id: 'prop-1', name: 'Unidad de Medida', type: 'Selección', unit: 'Kg / Lt / Unid', isRequired: true },
-  { id: 'prop-2', name: 'Alícuota IVA', type: 'Número', unit: '%', isRequired: true },
-  { id: 'prop-3', name: 'Código de Impuesto Interno', type: 'Texto', unit: 'Cod.', isRequired: false }
-];
+const INITIAL_PROPERTIES: CustomProperty[] = [];
 
 export const ConfiguracionModal: React.FC<ConfiguracionModalProps> = ({
   isOpen,

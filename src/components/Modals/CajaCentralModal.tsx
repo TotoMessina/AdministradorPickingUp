@@ -48,13 +48,7 @@ interface CashMovement {
   registerCode: string;
 }
 
-const INITIAL_TARIFFS: CardTariff[] = [
-  { id: 'tar-1', name: 'Visa Crédito', code: 'VISA-CR', type: 'Credito', feePercent: 1.8, accreditationDays: 2, isActive: true },
-  { id: 'tar-2', name: 'Visa Débito', code: 'VISA-DB', type: 'Debito', feePercent: 0.8, accreditationDays: 1, isActive: true },
-  { id: 'tar-3', name: 'Mastercard Crédito', code: 'MC-CR', type: 'Credito', feePercent: 1.9, accreditationDays: 2, isActive: true },
-  { id: 'tar-4', name: 'MercadoPago QR', code: 'MP-QR', type: 'QR / Transferencia', feePercent: 0.6, accreditationDays: 0, isActive: true },
-  { id: 'tar-5', name: 'Tarjeta Naranja', code: 'NARANJA', type: 'Credito', feePercent: 2.1, accreditationDays: 3, isActive: true }
-];
+const INITIAL_TARIFFS: CardTariff[] = [];
 
 const INITIAL_MOVEMENTS: CashMovement[] = [];
 

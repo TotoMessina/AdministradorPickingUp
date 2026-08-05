@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   X,
   LayoutGrid,
@@ -103,7 +103,7 @@ export const OtrosModal: React.FC<OtrosModalProps> = ({
         if (rawVouchers) loadedVouchers = JSON.parse(rawVouchers);
       } catch {}
 
-      if (user && user.id !== 'demo-user-1234' && activeStore) {
+      if (user && user.id !== 'demo-user-1234' && activeStore && isValidUUID(activeStore.id)) {
         try {
           const { data: dbFlows } = await supabase
             .from('cash_movements')
@@ -178,7 +178,7 @@ export const OtrosModal: React.FC<OtrosModalProps> = ({
   };
 
   const syncOtrosToSupabase = async (key: string, data: any) => {
-    if (user && user.id !== 'demo-user-1234' && activeStore) {
+    if (user && user.id !== 'demo-user-1234' && activeStore && isValidUUID(activeStore.id)) {
       try {
         await supabase.from('cash_movements').insert({
           store_id: activeStore.id,
@@ -244,7 +244,7 @@ export const OtrosModal: React.FC<OtrosModalProps> = ({
     saveStorage('flows', updated);
 
     // Save to Supabase cash_movements if authenticated
-    if (user && user.id !== 'demo-user-1234' && activeStore) {
+    if (user && user.id !== 'demo-user-1234' && activeStore && isValidUUID(activeStore.id)) {
       try {
         await supabase.from('cash_movements').insert({
           store_id: activeStore.id,
@@ -282,7 +282,7 @@ export const OtrosModal: React.FC<OtrosModalProps> = ({
     setVouchers(updated);
     saveStorage('vouchers', updated);
 
-    if (user && user.id !== 'demo-user-1234' && activeStore) {
+    if (user && user.id !== 'demo-user-1234' && activeStore && isValidUUID(activeStore.id)) {
       try {
         await supabase.from('cash_movements').insert({
           store_id: activeStore.id,
