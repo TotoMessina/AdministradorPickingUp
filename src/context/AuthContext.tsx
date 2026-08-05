@@ -1,0 +1,149 @@
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { User, Session } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
+
+interface AuthContextType {
+  user: User | null;
+  session: Session | null;
+  loading: boolean;
+  isDemoMode: boolean;
+  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string, fullName: string, storeName: string) => Promise<{ error: any }>;
+  signOut: () => Promise<void>;
+  loginAsDemo: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const MOCK_DEMO_USER: any = {
+  id: 'demo-user-1234',
+  email: 'operador@scanntech.com',
+  user_metadata: {
+    full_name: 'Carlos Admin',
+    role: 'Propietario'
+  }
+};
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false);
+
+  useEffect(() => {
+    // Check initial auth state from Supabase
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
+    }).catch(() => {
+      setLoading(false);
+    });
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session) {
+        setIsDemoMode(false);
+      }
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    return { error };
+  };
+
+  const signUp = async (email: string, password: string, fullName: string, storeName: string) => {
+    setLoading(true);
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName,
+          store_name: storeName,
+          role: 'owner'
+        }
+      }
+    });
+
+    if (!error && data?.user) {
+      try {
+        const slug = storeName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(1000 + Math.random() * 9000);
+        const code = 'SUC-' + Math.floor(100 + Math.random() * 900);
+        const { data: storeRes } = await supabase
+          .from('stores')
+          .insert({ name: storeName, slug, code, plan: 'enterprise' })
+          .select()
+          .single();
+
+        if (storeRes) {
+          await supabase.from('store_members').insert({
+            store_id: storeRes.id,
+            user_id: data.user.id,
+            role: 'owner'
+          });
+        }
+      } catch {
+        // Trigger or TenantContext handles fallback
+      }
+    }
+
+    setLoading(false);
+    return { error };
+  };
+
+  const signOut = async () => {
+    if (isDemoMode) {
+      setUser(null);
+      setSession(null);
+      setIsDemoMode(false);
+      return;
+    }
+    await supabase.auth.signOut();
+  };
+
+  const loginAsDemo = () => {
+    setIsDemoMode(true);
+    setUser(MOCK_DEMO_USER);
+    setSession({
+      access_token: 'demo-token',
+      token_type: 'bearer',
+      expires_in: 3600,
+      refresh_token: 'demo-refresh',
+      user: MOCK_DEMO_USER
+    });
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        loading,
+        isDemoMode,
+        signIn,
+        signUp,
+        signOut,
+        loginAsDemo
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

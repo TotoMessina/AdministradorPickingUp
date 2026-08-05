@@ -1,0 +1,282 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --font-main: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  
+  /* Modern Indigo Light Theme Palette (Matching Reference UI) */
+  --bg-app: #f3f4f8;
+  --bg-surface: #ffffff;
+  --bg-glass: rgba(255, 255, 255, 0.88);
+  --bg-sidebar: #ffffff;
+  --bg-sidebar-hover: #f8fafc;
+  --text-main: #1e293b;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+  --border-light: #e8ecf4;
+  --shadow-sm: 0 2px 8px rgba(99, 102, 241, 0.04);
+  --shadow-md: 0 10px 25px -5px rgba(99, 102, 241, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 20px 35px -10px rgba(99, 102, 241, 0.12);
+
+  /* PickingUp! Primary Brand Colors */
+  --brand-blue: #4f46e5;
+  --brand-blue-hover: #4338ca;
+  --brand-accent: #6366f1;
+  --brand-light-bg: #eef2ff;
+  --brand-dark: #1e1b4b;
+
+  /* Module Color Themes */
+  --theme-red: #ef4444;
+  --theme-red-bg: #fef2f2;
+  --theme-red-border: #fecaca;
+
+  --theme-green: #10b981;
+  --theme-green-bg: #ecfdf5;
+  --theme-green-border: #a7f3d0;
+
+  --theme-purple: #8b5cf6;
+  --theme-purple-bg: #f5f3ff;
+  --theme-purple-border: #ddd6fe;
+
+  --theme-blue: #3b82f6;
+  --theme-blue-bg: #eff6ff;
+  --theme-blue-border: #bfdbfe;
+
+  --theme-orange: #f59e0b;
+  --theme-orange-bg: #fffbeb;
+  --theme-orange-border: #fde68a;
+
+  --theme-sky: #0ea5e9;
+  --theme-sky-bg: #f0f9ff;
+  --theme-sky-border: #bae6fd;
+
+  --theme-lime: #84cc16;
+  --theme-lime-bg: #f7fee7;
+  --theme-lime-border: #d9f99d;
+
+  --theme-rose: #f43f5e;
+  --theme-rose-bg: #fff1f2;
+  --theme-rose-border: #fecdd3;
+
+  --theme-teal: #14b8a6;
+  --theme-teal-bg: #f0fdf4;
+  --theme-teal-border: #99f6e4;
+}
+
+[data-theme='dark'] {
+  --bg-app: #0f172a;
+  --bg-surface: #1e293b;
+  --bg-glass: rgba(30, 41, 59, 0.88);
+  --bg-sidebar: #1e293b;
+  --bg-sidebar-hover: #334155;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --border-light: #334155;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 20px 35px -10px rgba(0, 0, 0, 0.5);
+
+  --brand-blue: #6366f1;
+  --brand-blue-hover: #818cf8;
+  --brand-accent: #a5b4fc;
+  --brand-light-bg: rgba(99, 102, 241, 0.2);
+  --brand-dark: #0f172a;
+
+  --theme-red-bg: rgba(239, 68, 68, 0.15);
+  --theme-red-border: rgba(239, 68, 68, 0.3);
+
+  --theme-green-bg: rgba(16, 185, 129, 0.15);
+  --theme-green-border: rgba(16, 185, 129, 0.3);
+
+  --theme-purple-bg: rgba(139, 92, 246, 0.15);
+  --theme-purple-border: rgba(139, 92, 246, 0.3);
+
+  --theme-blue-bg: rgba(59, 130, 246, 0.15);
+  --theme-blue-border: rgba(59, 130, 246, 0.3);
+
+  --theme-orange-bg: rgba(245, 158, 11, 0.15);
+  --theme-orange-border: rgba(245, 158, 11, 0.3);
+
+  --theme-sky-bg: rgba(14, 165, 233, 0.15);
+  --theme-sky-border: rgba(14, 165, 233, 0.3);
+
+  --theme-lime-bg: rgba(132, 204, 22, 0.15);
+  --theme-lime-border: rgba(132, 204, 22, 0.3);
+
+  --theme-rose-bg: rgba(244, 63, 94, 0.15);
+  --theme-rose-border: rgba(244, 63, 94, 0.3);
+
+  --theme-teal-bg: rgba(20, 184, 166, 0.15);
+  --theme-teal-border: rgba(20, 184, 166, 0.3);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-main);
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 9999px;
+  opacity: 0.3;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-blue);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+/* Shepherd.js Custom Theme Overrides */
+.shepherd-has-title .shepherd-content .shepherd-header {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+  padding: 0.875rem 1.25rem !important;
+}
+
+.shepherd-title {
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  font-size: 0.95rem !important;
+}
+
+.shepherd-text {
+  padding: 1.25rem !important;
+  font-size: 0.875rem !important;
+  color: #1e293b !important;
+  line-height: 1.5 !important;
+}
+
+.shepherd-element {
+  background: #ffffff !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid rgba(2, 132, 199, 0.3) !important;
+  overflow: hidden !important;
+  max-width: 400px !important;
+  z-index: 99999 !important;
+}
+
+.shepherd-button {
+  border-radius: 0.5rem !important;
+  font-weight: 800 !important;
+  font-size: 0.8125rem !important;
+  padding: 0.5rem 1rem !important;
+  cursor: pointer !important;
+}
+
+.shepherd-button-primary {
+  background: #0284c7 !important;
+  color: #ffffff !important;
+  border: none !important;
+}
+
+.shepherd-button-secondary {
+  background: #e2e8f0 !important;
+  color: #475569 !important;
+  border: none !important;
+}
+
+.shepherd-target-highlight {
+  outline: 3px solid #0284c7 !important;
+  outline-offset: 4px !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 0 20px rgba(2, 132, 199, 0.6) !important;
+}
+
+/* Ensure inputs, forms, and interactive controls are never blocked by Shepherd overlay */
+.shepherd-modal-overlay-container {
+  pointer-events: none !important;
+}
+
+.shepherd-element,
+.shepherd-target,
+.shepherd-target *,
+input, select, textarea, button, form {
+  pointer-events: auto !important;
+}
+
+div[style*="fixed"][style*="zIndex"],
+div[style*="fixed"][style*="z-index"] {
+  pointer-events: auto !important;
+}
+
+/* Glassmorphism helpers */
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-light);
+}
+
+/* Utility classes */
+.btn-primary {
+  background: linear-gradient(135deg, var(--brand-blue) 0%, #0369a1 100%);
+  color: white;
+  font-weight: 600;
+  border: none;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(2, 132, 199, 0.35);
+  background: linear-gradient(135deg, #0284c7 0%, #0284c7 100%);
+}
+
+.btn-secondary {
+  background: var(--bg-surface);
+  color: var(--text-main);
+  border: 1px solid var(--border-light);
+  font-weight: 500;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--border-light);
+  color: var(--text-main);
+}
