@@ -3,7 +3,7 @@ import { ActionItem } from '../Dashboard/FavoritesBar';
 import { useTenant } from '../../context/TenantContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { APP_CONFIG } from '../../config/appConfig';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   X,
   Zap,
@@ -124,6 +124,77 @@ export const ActionModal: React.FC<ActionModalProps> = ({ action, onClose, onNav
   const [distributeTargetRegs, setDistributeTargetRegs] = useState<string[]>(['all']);
   const [isDistributing, setIsDistributing] = useState(false);
   const [lastDistributeTime, setLastDistributeTime] = useState<string | null>(null);
+
+  const fetchPriceLists = async () => {
+    // Load lists from localStorage
+    try {
+      const rawLists = localStorage.getItem(`pickingup_pricelists_${storeKey}`);
+      if (rawLists) {
+        const parsed = JSON.parse(rawLists);
+        setPriceLists(parsed);
+        if (parsed.length > 0 && selectedListId === 'base') {
+          setSelectedListId(parsed[0].id);
+        }
+      }
+    } catch {}
+
+    // Load lists from Supabase
+    if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
+      try {
+        const { data, error } = await supabase
+          .from('price_lists')
+          .select('*')
+          .eq('store_id', activeStore.id)
+          .order('code', { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          setPriceLists(data);
+          if (selectedListId === 'base') {
+            setSelectedListId(data[0].id);
+          }
+        }
+      } catch {}
+    }
+  };
+
+  const fetchSampleData = async () => {
+    setLoading(true);
+    try {
+      // 1. Try local cache first
+      const rawLocal = localStorage.getItem(`pickingup_prodprices_${storeKey}`);
+      if (rawLocal) {
+        const parsed = JSON.parse(rawLocal);
+        if (parsed && parsed.length > 0) {
+          const mapped = parsed.map((p: any) => ({
+            id: p.code,
+            code: p.code,
+            description: p.description,
+            category: p.category,
+            price: p.base_price || p.price,
+            custom_prices: p.custom_prices || {}
+          }));
+          setArticles(mapped);
+        }
+      }
+
+      // 2. Fetch from Supabase DB
+      if (activeStore?.id && isValidUUID(activeStore.id)) {
+        const { data, error } = await supabase
+          .from('articles')
+          .select('*')
+          .eq('store_id', activeStore.id)
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          setArticles(data);
+        }
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Reset selectedListId whenever the active store changes
   useEffect(() => {
@@ -281,73 +352,7 @@ export const ActionModal: React.FC<ActionModalProps> = ({ action, onClose, onNav
     );
   }
 
-  const fetchPriceLists = async () => {
-    // Load lists from localStorage
-    try {
-      const rawLists = localStorage.getItem(`pickingup_pricelists_${storeKey}`);
-      if (rawLists) {
-        const parsed = JSON.parse(rawLists);
-        setPriceLists(parsed);
-        if (parsed.length > 0 && selectedListId === 'base') {
-          setSelectedListId(parsed[0].id);
-        }
-      }
-    } catch {}
 
-    // Load lists from Supabase
-    if (user && !isDemoMode && activeStore) {
-      try {
-        const { data, error } = await supabase
-          .from('price_lists')
-          .select('*')
-          .eq('store_id', activeStore.id)
-          .order('code', { ascending: true });
-
-        if (!error && data && data.length > 0) {
-          setPriceLists(data);
-          if (selectedListId === 'base') {
-            setSelectedListId(data[0].id);
-          }
-        }
-      } catch {}
-    }
-  };
-
-  const fetchSampleData = async () => {
-    setLoading(true);
-    try {
-      // 1. Try local cache first
-      const rawLocal = localStorage.getItem(`pickingup_prodprices_${storeKey}`);
-      if (rawLocal) {
-        const parsed = JSON.parse(rawLocal);
-        if (parsed && parsed.length > 0) {
-          const mapped = parsed.map((p: any) => ({
-            id: p.code,
-            code: p.code,
-            description: p.description,
-            category: p.category,
-            price: p.base_price || p.price,
-            custom_prices: p.custom_prices || {}
-          }));
-          setArticles(mapped);
-        }
-      }
-
-      // 2. Fetch from Supabase DB
-      let query = supabase.from('articles').select('*');
-      if (activeStore?.id) {
-        query = query.eq('store_id', activeStore.id).order('created_at', { ascending: false });
-      }
-      const { data, error } = await query;
-      if (!error && data && data.length > 0) {
-        setArticles(data);
-      }
-    } catch {
-      // Ignore
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const syncArticlesToStorage = (updatedArticles: any[]) => {
     setArticles(updatedArticles);

@@ -91,7 +91,7 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const storeCode = code ? code.trim().toUpperCase() : `SUC-${Math.floor(100 + Math.random() * 900)}`;
 
     let newStoreObj: Store = {
-      id: 'store-' + Date.now(),
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : '11111111-1111-1111-1111-111111111111',
       name: storeName.toUpperCase(),
       slug: generatedSlug,
       code: storeCode,
@@ -246,7 +246,7 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } else {
         // Fallback for real user if DB table not populated yet: create dynamic user store object with user's business name
         const userFallbackStore: Store = {
-          id: `user-store-${user.id}`,
+          id: user.id,
           name: userStoreName,
           slug: generatedSlug,
           code: generatedCode,
@@ -261,7 +261,7 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       console.error('Error fetching/creating store:', err);
       const userStoreName = user.user_metadata?.store_name || `Supermercado (${user.email?.split('@')[0] || 'Mi Negocio'})`;
       const fallbackStore: Store = {
-        id: `user-store-${user.id}`,
+        id: user?.id || '11111111-1111-1111-1111-111111111111',
         name: userStoreName,
         slug: 'mi-negocio',
         code: 'SUC-001',

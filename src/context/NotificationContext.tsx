@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 import { useTenant } from './TenantContext';
-import { supabase } from '../lib/supabase';
+import { supabase, isValidUUID } from '../lib/supabase';
 
 export interface NotificationItem {
   id: string;
@@ -121,7 +121,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (activeStore?.id) {
+      if (activeStore?.id && isValidUUID(activeStore.id)) {
         query = query.or(`store_id.eq.${activeStore.id},store_id.is.null`);
       }
 

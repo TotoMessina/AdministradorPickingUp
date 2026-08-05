@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TenantProvider, useTenant } from './context/TenantContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { supabase } from './lib/supabase';
+import { supabase, SUPABASE_ANON_KEY, isValidUUID } from './lib/supabase';
 import { LoginForm } from './components/Auth/LoginForm';
 import { Header } from './components/Layout/Header';
 import { Sidebar } from './components/Layout/Sidebar';
@@ -214,7 +214,7 @@ export const AppContent: React.FC = () => {
         }
       });
 
-      if (user && activeStore && !isDemoMode && user.id !== 'demo-user-1234') {
+      if (user && activeStore && isValidUUID(activeStore.id) && !isDemoMode && user.id !== 'demo-user-1234') {
         try {
           const { data: dbMovements } = await supabase
             .from('stock_movements')
@@ -241,7 +241,11 @@ export const AppContent: React.FC = () => {
       try {
         const supabaseUrl = (supabase as any).supabaseUrl;
         if (supabaseUrl) {
-          await fetch(`${supabaseUrl}/rest/v1/`, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' });
+          await fetch(`${supabaseUrl}/rest/v1/`, {
+            method: 'HEAD',
+            headers: { 'apikey': SUPABASE_ANON_KEY },
+            cache: 'no-store'
+          });
         } else {
           await supabase.auth.getSession();
         }
@@ -272,7 +276,7 @@ export const AppContent: React.FC = () => {
     const loadFavorites = async () => {
       let combinedSlugs: string[] = [...localSlugs];
 
-      if (user && activeStore && !isDemoMode && user.id !== 'demo-user-1234') {
+      if (user && activeStore && isValidUUID(activeStore.id) && !isDemoMode && user.id !== 'demo-user-1234') {
         try {
           const { data, error } = await supabase
             .from('user_favorites')
