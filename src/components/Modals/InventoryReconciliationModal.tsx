@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   X,
   CheckCircle2,
@@ -157,7 +157,7 @@ export const InventoryReconciliationModal: React.FC<InventoryReconciliationModal
       localStorage.setItem(`pickingup_prodprices_${storeKey}`, JSON.stringify(localCatalog));
     } catch {}
 
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore?.isRealDbStore && isValidUUID(activeStore.id)) {
       try {
         for (const item of itemsWithDiff) {
           await supabase

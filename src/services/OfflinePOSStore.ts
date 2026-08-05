@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase, isValidUUID } from '../lib/supabase';
 
 export interface OfflineSaleItem {
   code: string;
@@ -155,6 +155,9 @@ export const getPendingOfflineSalesCount = async (storeId: string): Promise<numb
 
 // --- SYNC ENGINE: POST PENDING SALES TO SUPABASE ---
 export const syncOfflineSalesWithSupabase = async (storeId: string): Promise<{ syncedCount: number; errors: any[] }> => {
+  if (!isValidUUID(storeId)) {
+    return { syncedCount: 0, errors: [] };
+  }
   let pendingSales: OfflineSaleRecord[] = [];
 
   // Fetch pending sales from IndexedDB

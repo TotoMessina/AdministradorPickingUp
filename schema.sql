@@ -127,51 +127,43 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 
--- RLS for Stores: only accessible by authenticated members of each store
+-- -- RLS for Stores: accessible by authenticated members or owner user
 DROP POLICY IF EXISTS "Stores are viewable and manageable by users" ON public.stores;
-CREATE POLICY "Stores are viewable and manageable by users"
+DROP POLICY IF EXISTS "Stores viewable and manageable by users" ON public.stores;
+CREATE POLICY "Stores viewable and manageable by users"
     ON public.stores FOR ALL
     TO authenticated
     USING (
       id IN (
         SELECT store_id FROM public.store_members
         WHERE user_id = auth.uid() AND is_active = true
-      )
+      ) OR id = auth.uid()
     )
     WITH CHECK (
-      id IN (
+      true
+    );
+
+-- RLS for Store Members: each user can manage their own memberships or stores they own/admin
+DROP POLICY IF EXISTS "Store memberships are viewable and manageable" ON public.store_members;
+DROP POLICY IF EXISTS "Store memberships are viewable by own user" ON public.store_members;
+DROP POLICY IF EXISTS "Store memberships manageable by owner or admin" ON public.store_members;
+DROP POLICY IF EXISTS "Store memberships deletable by owner" ON public.store_members;
+
+CREATE POLICY "Store memberships viewable and manageable"
+    ON public.store_members FOR ALL
+    TO authenticated
+    USING (
+      user_id = auth.uid()
+      OR store_id IN (
         SELECT store_id FROM public.store_members
         WHERE user_id = auth.uid() AND is_active = true
       )
-    );
-
--- RLS for Store Members: each user can only see their own memberships
--- Owners/admins can see all memberships within their stores
-DROP POLICY IF EXISTS "Store memberships are viewable and manageable" ON public.store_members;
-CREATE POLICY "Store memberships are viewable by own user"
-    ON public.store_members FOR SELECT
-    TO authenticated
-    USING (user_id = auth.uid());
-
-DROP POLICY IF EXISTS "Store memberships manageable by owner or admin" ON public.store_members;
-CREATE POLICY "Store memberships manageable by owner or admin"
-    ON public.store_members FOR INSERT
-    TO authenticated
+    )
     WITH CHECK (
-      store_id IN (
+      user_id = auth.uid()
+      OR store_id IN (
         SELECT store_id FROM public.store_members
         WHERE user_id = auth.uid() AND role IN ('owner', 'admin') AND is_active = true
-      )
-    );
-
-DROP POLICY IF EXISTS "Store memberships deletable by owner" ON public.store_members;
-CREATE POLICY "Store memberships deletable by owner"
-    ON public.store_members FOR DELETE
-    TO authenticated
-    USING (
-      store_id IN (
-        SELECT store_id FROM public.store_members
-        WHERE user_id = auth.uid() AND role = 'owner' AND is_active = true
       )
     );
 
@@ -295,12 +287,12 @@ CREATE POLICY "Articles accessible only by active members of the store"
     USING (
       store_id IN (
         SELECT store_id FROM public.store_members WHERE user_id = auth.uid() AND is_active = true
-      ) OR store_id IS NULL
+      ) OR store_id = auth.uid() OR store_id IS NULL
     )
     WITH CHECK (
       store_id IN (
         SELECT store_id FROM public.store_members WHERE user_id = auth.uid() AND is_active = true
-      ) OR store_id IS NULL
+      ) OR store_id = auth.uid() OR store_id IS NULL
     );
 
 -- ------------------------------------------
@@ -324,7 +316,7 @@ CREATE TABLE IF NOT EXISTS public.price_lists (
 
 ALTER TABLE public.price_lists ENABLE ROW LEVEL SECURITY;
 
--- RLS for Price Lists: only accessible by active members of the owning store
+-- RLS for Price Lists: only accessible by active members of the owning store or store owner
 DROP POLICY IF EXISTS "Price lists viewable and manageable" ON public.price_lists;
 CREATE POLICY "Price lists viewable and manageable"
     ON public.price_lists FOR ALL
@@ -333,13 +325,13 @@ CREATE POLICY "Price lists viewable and manageable"
       store_id IN (
         SELECT store_id FROM public.store_members
         WHERE user_id = auth.uid() AND is_active = true
-      )
+      ) OR store_id = auth.uid()
     )
     WITH CHECK (
       store_id IN (
         SELECT store_id FROM public.store_members
         WHERE user_id = auth.uid() AND is_active = true
-      )
+      ) OR store_id = auth.uid()
     );
 
 CREATE TABLE IF NOT EXISTS public.price_list_items (

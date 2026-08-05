@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   requestUSBPrinterDevice,
   printDirectToUSB,
@@ -635,7 +635,7 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
     }
 
     // 2. Persist Sale Movement in Supabase DB
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore?.isRealDbStore && isValidUUID(activeStore.id)) {
       try {
         const { data: smData, error: smError } = await supabase
           .from('stock_movements')

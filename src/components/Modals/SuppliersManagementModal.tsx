@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   X,
   Plus,
@@ -155,7 +155,7 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
     } catch {}
 
     // Supabase DB
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
       try {
         const { data: dbSuppliers } = await supabase
           .from('suppliers')
@@ -286,7 +286,7 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
 
     syncSuppliers(updatedList);
 
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
       try {
         const { error: suppError } = await supabase
           .from('suppliers')
@@ -366,7 +366,7 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
     });
     syncSuppliers(updatedSuppliers);
 
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
       try {
         const { error: invError } = await supabase.from('supplier_invoices').insert({
           store_id: activeStore.id,
@@ -462,7 +462,7 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
     });
     syncSuppliers(updatedSuppliers);
 
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
       try {
         const { error: payError } = await supabase.from('supplier_payments').insert({
           store_id: activeStore.id,

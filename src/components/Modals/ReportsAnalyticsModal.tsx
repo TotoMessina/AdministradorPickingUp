@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   X,
   PieChart,
@@ -70,7 +70,7 @@ export const ReportsAnalyticsModal: React.FC<ReportsAnalyticsModalProps> = ({
     } catch {}
 
     // Supabase DB
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore?.isRealDbStore && isValidUUID(activeStore.id)) {
       try {
         const { data: dbArticles } = await supabase
           .from('articles')

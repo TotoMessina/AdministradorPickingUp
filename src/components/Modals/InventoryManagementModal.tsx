@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   X,
   Box,
@@ -127,7 +127,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
     }
 
     // Load from Supabase DB if logged in
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore?.isRealDbStore && isValidUUID(activeStore.id)) {
       try {
         const { data, error } = await supabase
           .from('stock_movements')
@@ -335,7 +335,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
     }
 
     // 2. Persist movement header to Supabase
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore?.isRealDbStore && isValidUUID(activeStore.id)) {
       try {
         await supabase.from('stock_movements').insert({
           store_id: activeStore.id,

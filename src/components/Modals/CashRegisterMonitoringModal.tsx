@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   X,
   Activity,
@@ -134,7 +134,7 @@ export const CashRegisterMonitoringModal: React.FC<CashRegisterMonitoringModalPr
       if (rawSales) realSales = JSON.parse(rawSales);
     } catch {}
 
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore?.isRealDbStore && isValidUUID(activeStore.id)) {
       try {
         const { data: dbMovements } = await supabase
           .from('stock_movements')
@@ -228,7 +228,7 @@ export const CashRegisterMonitoringModal: React.FC<CashRegisterMonitoringModalPr
       loadMonitoringData();
     }
 
-    if (isOpen && activeStore?.id && user && !isDemoMode) {
+    if (isOpen && activeStore?.isRealDbStore && isValidUUID(activeStore.id) && user && !isDemoMode) {
       const channel = supabase
         .channel(`realtime_monitoring_${activeStore.id}`)
         .on('postgres_changes', {

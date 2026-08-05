@@ -90,7 +90,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setIsLoading(true);
     const readSet = getSavedReadIds();
 
-    if (isDemoMode || user.id === 'demo-user-1234') {
+    if (isDemoMode || user.id === 'demo-user-1234' || !activeStore?.isRealDbStore || !isValidUUID(activeStore?.id)) {
       const storeName = activeStore?.name || 'Tu Comercio Demo';
       const demoList: NotificationItem[] = [
         {
@@ -116,16 +116,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     try {
-      let query = supabase
+      const { data, error } = await supabase
         .from('notifications')
         .select('*')
+        .or(`store_id.eq.${activeStore.id},store_id.is.null`)
         .order('created_at', { ascending: false });
-
-      if (activeStore?.id && isValidUUID(activeStore.id)) {
-        query = query.or(`store_id.eq.${activeStore.id},store_id.is.null`);
-      }
-
-      const { data, error } = await query;
 
       if (!error && data && data.length > 0) {
         const processed = data.map((n: any) => ({
@@ -165,14 +160,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
 
-    if (user && !isDemoMode && user.id !== 'demo-user-1234') {
+    if (user && !isDemoMode && user.id !== 'demo-user-1234' && activeStore?.isRealDbStore && isValidUUID(activeStore?.id)) {
       try {
-        if (activeStore?.id) {
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .or(`store_id.eq.${activeStore.id},store_id.is.null`);
-        }
+        await supabase
+          .from('notifications')
+          .update({ is_read: true })
+          .or(`store_id.eq.${activeStore.id},store_id.is.null`);
       } catch {
         // Ignore
       }
@@ -254,7 +247,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setNotifications(prev => [newNotif, ...prev]);
 
     // Save to Supabase DB if authenticated real user
-    if (user && !isDemoMode && user.id !== 'demo-user-1234' && activeStore) {
+    if (user && !isDemoMode && user.id !== 'demo-user-1234' && activeStore?.isRealDbStore && isValidUUID(activeStore?.id)) {
       try {
         await supabase
           .from('notifications')
@@ -279,7 +272,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } catch {
       // Ignore
     }
-    if (user && !isDemoMode && user.id !== 'demo-user-1234' && activeStore) {
+    if (user && !isDemoMode && user.id !== 'demo-user-1234' && activeStore?.isRealDbStore && isValidUUID(activeStore?.id)) {
       try {
         await supabase
           .from('notifications')

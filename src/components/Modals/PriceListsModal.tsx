@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { BaseModal } from './BaseModal';
@@ -71,7 +71,7 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
       }
 
       // 2. Fetch from Supabase if logged in
-      if (user && !isDemoMode && activeStore) {
+      if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
         try {
           const { data, error } = await supabase
             .from('price_lists')
@@ -144,7 +144,7 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
     saveListsToStorage(updated);
 
     // Save to Supabase DB if logged in
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
       try {
         await supabase.from('price_lists').upsert({
           store_id: activeStore.id,

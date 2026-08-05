@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isValidUUID } from '../../lib/supabase';
 import {
   X,
   TrendingUp,
@@ -89,7 +89,7 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
     let loadedCashMovs: any[] = [];
 
     // 1. Read Supabase Live Records first for Authenticated Users
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore?.isRealDbStore && isValidUUID(activeStore.id)) {
       try {
         const { data: dbArticles } = await supabase
           .from('articles')

@@ -213,10 +213,30 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }
         }
 
-        // Fallback for real user if DB store membership is not populated yet
+        // Auto-provision store in DB for authenticated user if DB membership is missing
         const userStoreName = user.user_metadata?.store_name || `Supermercado (${user.email?.split('@')[0] || 'Mi Negocio'})`;
         const generatedSlug = userStoreName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(1000 + Math.random() * 9000);
         const generatedCode = 'SUC-' + Math.floor(100 + Math.random() * 900);
+
+        try {
+          await supabase.from('stores').upsert({
+            id: user.id,
+            name: userStoreName.toUpperCase(),
+            slug: generatedSlug,
+            code: generatedCode,
+            plan: 'enterprise',
+            is_active: true
+          }, { onConflict: 'id' });
+
+          await supabase.from('store_members').upsert({
+            store_id: user.id,
+            user_id: user.id,
+            role: 'owner',
+            is_active: true
+          }, { onConflict: 'store_id,user_id' });
+        } catch {
+          // Ignore RLS or table errors
+        }
 
         const userFallbackStore: Store = {
           id: user.id,
@@ -226,7 +246,7 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           plan: 'enterprise',
           is_active: true,
           user_role: 'Propietario',
-          isRealDbStore: false
+          isRealDbStore: true
         };
         setStores([userFallbackStore]);
         setActiveStoreState(userFallbackStore);
