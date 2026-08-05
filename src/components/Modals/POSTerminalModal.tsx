@@ -630,11 +630,31 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
         storeId: activeStore?.id || 'demo-store'
       };
       localStorage.setItem(`pickingup_sales_history_${storeKey}`, JSON.stringify([newSaleRecord, ...prevSales]));
+
+      const newMovRecord = {
+        id: `mov-${Date.now()}`,
+        date: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        movement_type: 'Egreso',
+        movementType: 'Egreso',
+        observations: `Venta POS - Ticket N° ${ticketNumber}`,
+        total_units: cart.reduce((sum, item) => sum + (item.qty || 1), 0),
+        items: cart.map(i => ({
+          code: i.code,
+          description: i.description,
+          qty: i.qty,
+          unitPrice: i.unitPrice || 0,
+          total: i.subtotal || 0
+        }))
+      };
+      const rawMovs = localStorage.getItem(`pickingup_stock_movements_${storeKey}`);
+      const prevMovs = rawMovs ? JSON.parse(rawMovs) : [];
+      localStorage.setItem(`pickingup_stock_movements_${storeKey}`, JSON.stringify([newMovRecord, ...prevMovs]));
     } catch (e) {
       console.warn('Error saving sales history:', e);
     }
 
-    // 2. Persist Sale Movement in Supabase DB
+    // 2. Persist Sale Movement & Cash Movement in Supabase DB
     if (user && !isDemoMode && activeStore?.isRealDbStore && isValidUUID(activeStore.id)) {
       try {
         const { data: smData, error: smError } = await supabase
@@ -662,6 +682,16 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
           await supabase.from('stock_movement_items').insert(itemsToInsert);
         }
 
+        // Insert cash income movement into cash_movements
+        await supabase.from('cash_movements').insert({
+          store_id: activeStore.id,
+          movement_type: 'Ingreso',
+          amount: finalTotal,
+          concept: `Venta POS Ticket N° ${ticketNumber} (${paymentMethod})`,
+          cashier_name: cashierName || user.email?.split('@')[0] || 'Operador',
+          register_code: 'POS-01'
+        });
+
         // Deduct article stock in DB
         for (const item of cart) {
           const currentProd = catalog.find(c => c.code === item.code);
@@ -675,9 +705,13 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
           }
         }
       } catch (err) {
-        console.error('Error persisting sale to DB:', err);
+        console.error('Error persisting POS sale in DB:', err);
       }
     }
+
+    try {
+      window.dispatchEvent(new Event('pickingup_sale_completed'));
+    } catch {}
 
     setIssuedReceipt(receiptData);
     setIsReceiptOpen(true);

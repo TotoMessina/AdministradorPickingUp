@@ -83,7 +83,7 @@ export const ReportsAnalyticsModal: React.FC<ReportsAnalyticsModalProps> = ({
 
         const { data: dbMovements } = await supabase
           .from('stock_movements')
-          .select('*')
+          .select('*, stock_movement_items(*)')
           .eq('store_id', activeStore.id)
           .order('created_at', { ascending: false });
 

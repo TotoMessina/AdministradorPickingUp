@@ -206,25 +206,40 @@ export const AppContent: React.FC = () => {
       let opsCount = 0;
       let opsAmount = 0;
 
-      // Count operations from local register sales history
-      configuredRegs.forEach((reg: any) => {
-        if (Array.isArray(reg.salesHistory)) {
-          opsCount += reg.salesHistory.length;
-          opsAmount += reg.salesHistory.reduce((acc: number, s: any) => acc + (s.totalAmount || 0), 0);
+      // a. Read from store-scoped sales history in localStorage
+      try {
+        const storeKey = activeStore?.id || 'demo-store';
+        const rawSales = localStorage.getItem(`pickingup_sales_history_${storeKey}`);
+        if (rawSales) {
+          const parsedSales = JSON.parse(rawSales);
+          if (Array.isArray(parsedSales)) {
+            const todaySales = parsedSales.filter((s: any) => new Date(s.date || s.created_at || Date.now()) >= todayStart);
+            opsCount = todaySales.length;
+            opsAmount = todaySales.reduce((acc: number, s: any) => acc + (Number(s.total) || Number(s.subtotal) || 0), 0);
+          }
         }
-      });
+      } catch {}
 
+      // b. Query DB stock_movements & stock_movement_items for real DB stores
       if (user && activeStore && activeStore.isRealDbStore && isValidUUID(activeStore.id) && !isDemoMode && user.id !== 'demo-user-1234') {
         try {
           const { data: dbMovements, error } = await supabase
             .from('stock_movements')
-            .select('total_units, created_at')
+            .select('id, created_at, stock_movement_items(qty, unit_price, total_price)')
             .eq('store_id', activeStore.id)
+            .eq('movement_type', 'Egreso')
             .gte('created_at', todayStart.toISOString());
 
           if (!error && dbMovements && dbMovements.length > 0) {
-            opsCount = Math.max(opsCount, dbMovements.length);
-            opsAmount = Math.max(opsAmount, dbMovements.reduce((acc, m) => acc + (Number(m.total_units) || 0), 0));
+            const dbOpsCount = dbMovements.length;
+            const dbOpsAmount = dbMovements.reduce((acc: number, m: any) => {
+              const items = m.stock_movement_items || [];
+              const mTotal = items.reduce((sum: number, i: any) => sum + (Number(i.total_price) || (Number(i.qty || 1) * Number(i.unit_price || 0))), 0);
+              return acc + mTotal;
+            }, 0);
+
+            opsCount = Math.max(opsCount, dbOpsCount);
+            opsAmount = Math.max(opsAmount, dbOpsAmount);
           }
         } catch {}
       }
@@ -250,8 +265,17 @@ export const AppContent: React.FC = () => {
     };
 
     loadRealMetrics();
-    const interval = setInterval(loadRealMetrics, 15000);
-    return () => clearInterval(interval);
+    const interval = setInterval(loadRealMetrics, 10000);
+    const handleSaleEvent = () => loadRealMetrics();
+
+    window.addEventListener('pickingup_sale_completed', handleSaleEvent);
+    window.addEventListener('storage', handleSaleEvent);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('pickingup_sale_completed', handleSaleEvent);
+      window.removeEventListener('storage', handleSaleEvent);
+    };
   }, [activeStore, user, isDemoMode]);
 
   // Load store-specific favorites from Supabase AND localStorage
