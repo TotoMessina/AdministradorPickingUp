@@ -11,6 +11,7 @@ export interface Store {
   plan: 'standard' | 'pro' | 'enterprise';
   is_active: boolean;
   user_role?: string;
+  isRealDbStore?: boolean;
 }
 
 export const MOCK_STORES: Store[] = [
@@ -21,7 +22,8 @@ export const MOCK_STORES: Store[] = [
     code: 'UP-001',
     plan: 'enterprise',
     is_active: true,
-    user_role: 'Administrador'
+    user_role: 'Administrador',
+    isRealDbStore: false
   },
   {
     id: '22222222-2222-2222-2222-222222222222',
@@ -30,7 +32,8 @@ export const MOCK_STORES: Store[] = [
     code: 'CS-002',
     plan: 'pro',
     is_active: true,
-    user_role: 'Supervisor'
+    user_role: 'Supervisor',
+    isRealDbStore: false
   },
   {
     id: '33333333-3333-3333-3333-333333333333',
@@ -39,7 +42,8 @@ export const MOCK_STORES: Store[] = [
     code: 'EM-003',
     plan: 'standard',
     is_active: true,
-    user_role: 'Operador'
+    user_role: 'Operador',
+    isRealDbStore: false
   }
 ];
 
@@ -180,71 +184,40 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         .eq('user_id', user.id)
         .eq('is_active', true);
 
-      if (!memberError && memberData && memberData.length > 0) {
-        const loadedStores: Store[] = memberData
-          .map((m: any) => {
-            const st = m.stores;
-            if (!st) return null;
-            return {
-              id: st.id,
-              name: st.name,
-              slug: st.slug,
-              logo_url: st.logo_url,
-              code: st.code || 'STORE',
-              plan: st.plan || 'enterprise',
-              is_active: st.is_active,
-              user_role: m.role || 'Propietario'
-            };
-          })
-          .filter(Boolean) as Store[];
+        if (!memberError && memberData && memberData.length > 0) {
+          const loadedStores: Store[] = memberData
+            .map((m: any) => {
+              const st = m.stores;
+              if (!st) return null;
+              return {
+                id: st.id,
+                name: st.name,
+                slug: st.slug,
+                logo_url: st.logo_url,
+                code: st.code || 'STORE',
+                plan: st.plan || 'enterprise',
+                is_active: st.is_active,
+                user_role: m.role || 'Propietario',
+                isRealDbStore: true
+              };
+            })
+            .filter(Boolean) as Store[];
 
-        if (loadedStores.length > 0) {
-          setStores(loadedStores);
-          const savedStoreId = localStorage.getItem(`scanntech_active_store_${user.id}`);
-          const selected = loadedStores.find(s => s.id === savedStoreId) || loadedStores[0];
-          setActiveStoreState(selected);
-          setIsLoadingStores(false);
-          return;
+          if (loadedStores.length > 0) {
+            setStores(loadedStores);
+            const savedStoreId = localStorage.getItem(`scanntech_active_store_${user.id}`);
+            const selected = loadedStores.find(s => s.id === savedStoreId) || loadedStores[0];
+            setActiveStoreState(selected);
+            setIsLoadingStores(false);
+            return;
+          }
         }
-      }
 
-      // If user has no store membership in DB yet, attempt to auto-create their store
-      const userStoreName = user.user_metadata?.store_name || `Supermercado (${user.email?.split('@')[0] || 'Mi Negocio'})`;
-      const generatedSlug = userStoreName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(1000 + Math.random() * 9000);
-      const generatedCode = 'SUC-' + Math.floor(100 + Math.random() * 900);
+        // Fallback for real user if DB store membership is not populated yet
+        const userStoreName = user.user_metadata?.store_name || `Supermercado (${user.email?.split('@')[0] || 'Mi Negocio'})`;
+        const generatedSlug = userStoreName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(1000 + Math.random() * 9000);
+        const generatedCode = 'SUC-' + Math.floor(100 + Math.random() * 900);
 
-      const { data: newStore, error: createStoreErr } = await supabase
-        .from('stores')
-        .insert({
-          name: userStoreName,
-          slug: generatedSlug,
-          code: generatedCode,
-          plan: 'enterprise'
-        })
-        .select()
-        .single();
-
-      if (!createStoreErr && newStore) {
-        await supabase.from('store_members').insert({
-          store_id: newStore.id,
-          user_id: user.id,
-          role: 'owner'
-        });
-
-        const createdStoreObj: Store = {
-          id: newStore.id,
-          name: newStore.name,
-          slug: newStore.slug,
-          code: newStore.code,
-          plan: 'enterprise',
-          is_active: true,
-          user_role: 'Propietario'
-        };
-
-        setStores([createdStoreObj]);
-        setActiveStoreState(createdStoreObj);
-      } else {
-        // Fallback for real user if DB table not populated yet: create dynamic user store object with user's business name
         const userFallbackStore: Store = {
           id: user.id,
           name: userStoreName,
@@ -252,11 +225,11 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           code: generatedCode,
           plan: 'enterprise',
           is_active: true,
-          user_role: 'Propietario'
+          user_role: 'Propietario',
+          isRealDbStore: false
         };
         setStores([userFallbackStore]);
         setActiveStoreState(userFallbackStore);
-      }
     } catch (err) {
       console.error('Error fetching/creating store:', err);
       const userStoreName = user.user_metadata?.store_name || `Supermercado (${user.email?.split('@')[0] || 'Mi Negocio'})`;

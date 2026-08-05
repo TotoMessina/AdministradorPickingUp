@@ -214,15 +214,15 @@ export const AppContent: React.FC = () => {
         }
       });
 
-      if (user && activeStore && isValidUUID(activeStore.id) && !isDemoMode && user.id !== 'demo-user-1234') {
+      if (user && activeStore && activeStore.isRealDbStore && isValidUUID(activeStore.id) && !isDemoMode && user.id !== 'demo-user-1234') {
         try {
-          const { data: dbMovements } = await supabase
+          const { data: dbMovements, error } = await supabase
             .from('stock_movements')
             .select('total_units, created_at')
             .eq('store_id', activeStore.id)
             .gte('created_at', todayStart.toISOString());
 
-          if (dbMovements && dbMovements.length > 0) {
+          if (!error && dbMovements && dbMovements.length > 0) {
             opsCount = Math.max(opsCount, dbMovements.length);
             opsAmount = Math.max(opsAmount, dbMovements.reduce((acc, m) => acc + (Number(m.total_units) || 0), 0));
           }
@@ -236,22 +236,13 @@ export const AppContent: React.FC = () => {
       const now = new Date();
       setRealLastUpdate(now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }));
 
-      // 4. Real-time Server Latency Check (Lightweight network ping without DB load)
+      // 4. Real-time Server Latency Check (Lightweight network ping using Supabase SDK)
       const startPing = performance.now();
       try {
-        const supabaseUrl = (supabase as any).supabaseUrl;
-        if (supabaseUrl) {
-          await fetch(`${supabaseUrl}/rest/v1/`, {
-            method: 'HEAD',
-            headers: { 'apikey': SUPABASE_ANON_KEY },
-            cache: 'no-store'
-          });
-        } else {
-          await supabase.auth.getSession();
-        }
+        const { error } = await supabase.from('modules').select('id').limit(1);
         const pingMs = Math.round(performance.now() - startPing);
         setServerLatency(`${pingMs} ms`);
-        setIsServerOnline(true);
+        setIsServerOnline(!error);
       } catch {
         setServerLatency('Offline');
         setIsServerOnline(false);
@@ -276,7 +267,7 @@ export const AppContent: React.FC = () => {
     const loadFavorites = async () => {
       let combinedSlugs: string[] = [...localSlugs];
 
-      if (user && activeStore && isValidUUID(activeStore.id) && !isDemoMode && user.id !== 'demo-user-1234') {
+      if (user && activeStore && activeStore.isRealDbStore && isValidUUID(activeStore.id) && !isDemoMode && user.id !== 'demo-user-1234') {
         try {
           const { data, error } = await supabase
             .from('user_favorites')
