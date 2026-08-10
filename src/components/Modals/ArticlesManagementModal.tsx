@@ -18,7 +18,8 @@ import {
   RotateCcw,
   Save,
   DollarSign,
-  Info
+  Info,
+  ArrowUpDown
 } from 'lucide-react';
 
 export interface ArticleItem {
@@ -80,6 +81,7 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'CRITICAL' | 'NO_PRICE'>('ALL');
+  const [sortBy, setSortBy] = useState<'MODIFIED_DESC' | 'NAME_ASC' | 'NAME_DESC' | 'CREATED_DESC' | 'PRICE_ASC' | 'PRICE_DESC' | 'STOCK_ASC' | 'STOCK_DESC'>('MODIFIED_DESC');
 
   // Modal Form State (Create / Edit Article)
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -478,6 +480,40 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
     return matchSearch && matchCat && matchStatus;
   });
 
+  const sortedArticles = [...filteredArticles].sort((a, b) => {
+    if (sortBy === 'NAME_ASC') {
+      return a.description.localeCompare(b.description, 'es', { sensitivity: 'base' });
+    }
+    if (sortBy === 'NAME_DESC') {
+      return b.description.localeCompare(a.description, 'es', { sensitivity: 'base' });
+    }
+    if (sortBy === 'CREATED_DESC') {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeB - timeA;
+    }
+    if (sortBy === 'PRICE_ASC') {
+      const priceA = selectedViewListId === 'base' ? a.price : (a.custom_prices?.[selectedViewListId] ?? a.price);
+      const priceB = selectedViewListId === 'base' ? b.price : (b.custom_prices?.[selectedViewListId] ?? b.price);
+      return (Number(priceA) || 0) - (Number(priceB) || 0);
+    }
+    if (sortBy === 'PRICE_DESC') {
+      const priceA = selectedViewListId === 'base' ? a.price : (a.custom_prices?.[selectedViewListId] ?? a.price);
+      const priceB = selectedViewListId === 'base' ? b.price : (b.custom_prices?.[selectedViewListId] ?? b.price);
+      return (Number(priceB) || 0) - (Number(priceA) || 0);
+    }
+    if (sortBy === 'STOCK_ASC') {
+      return (Number(a.stock) || 0) - (Number(b.stock) || 0);
+    }
+    if (sortBy === 'STOCK_DESC') {
+      return (Number(b.stock) || 0) - (Number(a.stock) || 0);
+    }
+    // Default: MODIFIED_DESC (Última modificación / más recientes)
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return timeB - timeA;
+  });
+
   const selectedViewListName = priceLists.find(l => l.id === selectedViewListId)?.name || 'Lista Base';
 
   if (!isOpen) return null;
@@ -778,10 +814,40 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
                     <option value="NO_PRICE">💲 Sin Precio Asignado ($0)</option>
                   </select>
                 )}
+
+                {/* Sort Order Selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <ArrowUpDown size={14} /> Ordenar:
+                  </span>
+                  <select
+                    id="select-catalogo-orden"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as any)}
+                    style={{
+                      padding: '0.5rem 0.875rem',
+                      borderRadius: '0.5rem',
+                      border: '1px solid #3b82f6',
+                      background: 'rgba(59, 130, 246, 0.08)',
+                      color: '#2563eb',
+                      fontWeight: 800,
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    <option value="MODIFIED_DESC">🕒 Última Modificación (Nuevos)</option>
+                    <option value="NAME_ASC">🔤 Nombre (A-Z)</option>
+                    <option value="NAME_DESC">🔤 Nombre (Z-A)</option>
+                    <option value="CREATED_DESC">📅 Fecha de Creación</option>
+                    <option value="PRICE_ASC">💲 Precio (Menor a Mayor)</option>
+                    <option value="PRICE_DESC">💲 Precio (Mayor a Menor)</option>
+                    <option value="STOCK_ASC">📦 Stock (Menor a Mayor)</option>
+                    <option value="STOCK_DESC">📦 Stock (Mayor a Menor)</option>
+                  </select>
+                </div>
               </div>
 
               <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                Mostrando <strong>{filteredArticles.length}</strong> de <strong>{listToDisplay.length}</strong> artículos
+                Mostrando <strong>{sortedArticles.length}</strong> de <strong>{listToDisplay.length}</strong> artículos
               </div>
             </div>
 
@@ -813,14 +879,14 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredArticles.length === 0 ? (
+                    {sortedArticles.length === 0 ? (
                       <tr>
                         <td colSpan={7} style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                           No se encontraron artículos que coincidan con la búsqueda o filtro aplicado.
                         </td>
                       </tr>
                     ) : (
-                      filteredArticles.map(art => {
+                      sortedArticles.map(art => {
                         const isLowStock = art.stock <= art.min_stock;
 
                         // Display price for selected list

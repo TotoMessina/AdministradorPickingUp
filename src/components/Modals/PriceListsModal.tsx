@@ -15,7 +15,8 @@ import {
   Upload,
   FileSpreadsheet,
   CheckSquare,
-  Square
+  Square,
+  ArrowUpDown
 } from 'lucide-react';
 
 export interface PriceList {
@@ -51,6 +52,7 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
   const { user, isDemoMode } = useAuth();
 
   const [priceLists, setPriceLists] = useState<PriceList[]>(DEFAULT_PRICE_LISTS);
+  const [priceListSortBy, setPriceListSortBy] = useState<'CODE_ASC' | 'NAME_ASC' | 'NAME_DESC' | 'DISCOUNT_DESC'>('CODE_ASC');
   const [editingList, setEditingList] = useState<Partial<PriceList> | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
 
@@ -364,12 +366,25 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
 
   if (!isOpen) return null;
 
+  const sortedPriceLists = [...priceLists].sort((a, b) => {
+    if (priceListSortBy === 'NAME_ASC') {
+      return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+    }
+    if (priceListSortBy === 'NAME_DESC') {
+      return b.name.localeCompare(a.name, 'es', { sensitivity: 'base' });
+    }
+    if (priceListSortBy === 'DISCOUNT_DESC') {
+      return (Number(b.discount_percent) || 0) - (Number(a.discount_percent) || 0);
+    }
+    return (Number(a.code) || 0) - (Number(b.code) || 0);
+  });
+
   return (
     <div style={{
       position: 'fixed',
       inset: 0,
-      background: 'rgba(0, 0, 0, 0.6)',
-      backdropFilter: 'blur(6px)',
+      background: 'rgba(0, 0, 0, 0.65)',
+      backdropFilter: 'blur(8px)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -440,50 +455,66 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
               background: 'rgba(255, 255, 255, 0.2)',
               border: 'none',
               borderRadius: '50%',
-              width: '34px',
-              height: '34px',
-              color: '#ffffff',
-              cursor: 'pointer',
+              width: '32px',
+              height: '32px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              color: '#ffffff',
+              cursor: 'pointer'
             }}
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Modal Navigation & CSV Toolbar */}
+        {/* Modal Action Toolbar */}
         <div style={{
+          padding: '0.875rem 1.5rem',
+          borderBottom: '1px solid var(--border-light)',
+          background: 'var(--bg-app)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderBottom: '1px solid var(--border-light)',
-          background: 'var(--bg-app)',
-          padding: '0.75rem 1.5rem',
-          flexWrap: 'wrap',
-          gap: '0.5rem'
+          gap: '1rem',
+          flexWrap: 'wrap'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--brand-blue)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <List size={18} /> 📋 Listas de Precios Configuradas ({priceLists.length})
-            </span>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+            Listas Activas: <strong style={{ color: 'var(--text-main)' }}>{sortedPriceLists.length}</strong>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept=".csv,.txt,.xlsx,.xls"
-              style={{ display: 'none' }}
-            />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {/* Sort Order Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <ArrowUpDown size={14} /> Ordenar:
+              </span>
+              <select
+                id="select-listas-orden"
+                value={priceListSortBy}
+                onChange={(e) => setPriceListSortBy(e.target.value as any)}
+                style={{
+                  padding: '0.4rem 0.75rem',
+                  borderRadius: '0.5rem',
+                  border: '1px solid #6366f1',
+                  background: 'rgba(99, 102, 241, 0.08)',
+                  color: '#4f46e5',
+                  fontWeight: 800,
+                  fontSize: '0.8125rem'
+                }}
+              >
+                <option value="CODE_ASC">🔢 Código Predeterminado</option>
+                <option value="NAME_ASC">🔤 Nombre Lista (A-Z)</option>
+                <option value="NAME_DESC">🔤 Nombre Lista (Z-A)</option>
+                <option value="DISCOUNT_DESC">💲 Mayor Descuento %</option>
+              </select>
+            </div>
 
             <button
               onClick={handleDownloadTemplate}
-              title="Descargar plantilla CSV para importar productos"
+              title="Descargar plantilla CSV con todos los artículos y precios"
               style={{
-                padding: '0.4rem 0.85rem',
+                padding: '0.4rem 0.875rem',
                 borderRadius: '0.5rem',
                 border: '1px solid var(--border-light)',
                 background: 'var(--bg-surface)',
@@ -496,7 +527,7 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
                 gap: '0.4rem'
               }}
             >
-              <FileSpreadsheet size={15} style={{ color: '#10b981' }} /> Plantilla CSV
+              <FileSpreadsheet size={15} style={{ color: 'var(--brand-blue)' }} /> Planilla CSV
             </button>
 
             <button
@@ -761,7 +792,7 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
                   </tr>
                 </thead>
                 <tbody>
-                  {priceLists.length === 0 ? (
+                  {sortedPriceLists.length === 0 ? (
                     <tr>
                       <td colSpan={9} style={{ padding: '3rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                         <FileSpreadsheet size={36} style={{ color: 'var(--brand-blue)', marginBottom: '0.5rem' }} />
@@ -807,11 +838,11 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
                       </td>
                     </tr>
                   ) : (
-                    priceLists.map((list, idx) => (
+                    sortedPriceLists.map((list, idx) => (
                       <tr
                         key={list.id}
                         style={{
-                          borderBottom: idx === priceLists.length - 1 ? 'none' : '1px solid var(--border-light)',
+                          borderBottom: idx === sortedPriceLists.length - 1 ? 'none' : '1px solid var(--border-light)',
                           background: idx % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-app)'
                         }}
                       >

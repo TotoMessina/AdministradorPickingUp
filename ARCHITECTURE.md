@@ -1,4 +1,4 @@
-﻿# PickingUp! Administración — Mapa de Arquitectura Completo
+# PickingUp! Administración — Mapa de Arquitectura Completo
 
 > **Propósito**: Este documento es la única fuente de verdad técnica del proyecto.
 > Leer solo este archivo es suficiente para entender la arquitectura, componentes, esquemas de base de datos en Supabase y cómo extender la aplicación.
@@ -88,8 +88,9 @@ supabase.auth.signIn()
 
 **Registro automático (DB Trigger `on_auth_user_created`):**
 1. Se crea el usuario en `auth.users`.
-2. El trigger `handle_new_user()` crea automáticamente un registro en `public.profiles` con rol `owner`.
-3. Si el signup incluye `store_name` en los metadatos, se crea también un registro en `public.stores` y una membresía en `public.store_members` con rol `owner`.
+2. El trigger `handle_new_user()` verifica si el registro incluye `store_name` en los metadatos:
+   - Si incluye `store_name` (creación de comercio), crea el registro en `public.profiles` con rol `owner`, genera un registro en `public.stores` con slug único seguro (`substr(gen_random_uuid(), 1, 8)`) y una membresía en `public.store_members` con rol `owner`.
+   - Si no incluye `store_name` (invitaciones a comercios existentes), asigna el rol indicado en metadatos o `operador` por defecto en `public.profiles`.
 
 **Cajeros (`operador`):** Son creados por `owner`/`admin` desde `UserPermissionsModal`. El flujo correcto es: invitar al cajero por email (Supabase Auth) → el `user_id` retornado se inserta en `store_members`.
 
@@ -212,11 +213,11 @@ return () => { supabase.removeChannel(channel); };
 **UNIQUE**: `(store_id, code)`
 
 #### `public.price_list_items` — Sobreescrituras de Precio por Producto y Lista
-`id` UUID PK, `price_list_id` UUID FK → price_lists (CASCADE), `article_code` TEXT, `custom_price` NUMERIC(10,2), `created_at` TIMESTAMPTZ.
-**UNIQUE**: `(price_list_id, article_code)`
+`id` UUID PK, `price_list_id` UUID FK → price_lists (CASCADE), `article_id` UUID FK → articles (CASCADE), `article_code` TEXT, `custom_price` NUMERIC(10,2), `created_at` TIMESTAMPTZ.
+**UNIQUE**: `(price_list_id, article_id)`
 
 #### `public.price_audit_logs` — Auditoría de Cambios de Precio (inmutable)
-`id` UUID PK, `store_id` UUID FK, `article_code` TEXT, `article_description` TEXT, `price_list_name` TEXT, `old_price` NUMERIC(12,2), `new_price` NUMERIC(12,2), `reason` TEXT, `user_email` TEXT, `created_at` TIMESTAMPTZ.
+`id` UUID PK, `store_id` UUID FK → stores, `article_id` UUID FK → articles (SET NULL), `article_code` TEXT, `article_description` TEXT, `price_list_name` TEXT, `old_price` NUMERIC(12,2), `new_price` NUMERIC(12,2), `reason` TEXT, `user_email` TEXT, `created_at` TIMESTAMPTZ.
 
 #### `public.cash_registers` — Configuración de Cajas por Tienda
 `id` UUID PK, `store_id` UUID FK, `code` TEXT, `name` TEXT, `cashier_name` TEXT, `version` TEXT (default: `v10.3.20 (iPOS-Android)`), `default_price_list_name` TEXT, `allowed_price_list_names` TEXT[], `is_active` BOOLEAN, `created_at` TIMESTAMPTZ.
@@ -226,7 +227,7 @@ return () => { supabase.removeChannel(channel); };
 `id` UUID PK, `store_id` UUID FK, `movement_type` TEXT (`Ingreso`/`Egreso`/`Ajuste de Stock`/`Transferencia`), `observations` TEXT, `total_units` NUMERIC(10,2), `created_by` UUID FK → auth.users, `created_at` TIMESTAMPTZ.
 
 #### `public.stock_movement_items` — Ítems por Movimiento
-`id` UUID PK, `movement_id` UUID FK → stock_movements (CASCADE), `article_code` TEXT, `article_description` TEXT, `qty` NUMERIC(10,2), `unit_price` NUMERIC(10,2), `total_price` NUMERIC(12,2), `created_at` TIMESTAMPTZ.
+`id` UUID PK, `movement_id` UUID FK → stock_movements (CASCADE), `article_id` UUID FK → articles (SET NULL), `article_code` TEXT, `article_description` TEXT, `qty` NUMERIC(10,2), `unit_price` NUMERIC(10,2), `total_price` NUMERIC(12,2), `created_at` TIMESTAMPTZ.
 
 #### `public.suppliers` — Proveedores por Comercio
 `id` UUID PK, `store_id` UUID FK, `code` TEXT, `name` TEXT, `cuit` TEXT, `phone` TEXT, `email` TEXT, `address` TEXT, `vat_condition` TEXT, `balance` NUMERIC(12,2), `is_active` BOOLEAN, `created_at` TIMESTAMPTZ.
@@ -325,4 +326,12 @@ return () => { supabase.removeChannel(channel); };
 - **Valores iniciales**: Los estados que se cargan desde Supabase deben inicializarse con `[]` o `null`, nunca con datos ficticios hardcodeados.
 - **Fallback $0**: Si no hay datos en Supabase, mostrar `$0` o `"Sin datos"`, nunca un valor inventado.
 - **Realtime**: Todo canal de Supabase debe limpiarse con `supabase.removeChannel()` en el `return` del `useEffect`.
-- **RLS**: Todas las tablas nuevas deben tener RLS habilitado y política `DROP POLICY IF EXISTS` para ser idempotentes.
+- **RLS & Multi-Tenant Isolation**: Todas las tablas poseen RLS habilitado con granularidad estricta por operación:
+  - **Lectura (`SELECT`)**: Todos los miembros activos de la tienda vía `public.get_my_store_ids()`.
+  - **Gestión Operativa (`INSERT`/`UPDATE`/`DELETE`)**: Restringido a roles de gestión (`owner`, `admin`, `supervisor`) vía `public.get_my_management_store_ids()`.
+  - **Gestión Administrativa (`stores`, `store_members`, `bank_accounts`, `card_tariffs`, `discount_rules`)**: Restringido a `owner` y `admin` únicamente vía `public.get_my_admin_store_ids()`.
+- **Actualización Atómica de Stock**: Los movimientos registrados en `stock_movement_items` desencadenan el trigger `apply_stock_movement()`, que actualiza `articles.stock` atómicamente en PostgreSQL dentro de la misma transacción SQL.
+- **Protección de Propietario (`prevent_last_owner_deletion()`)**: Impide la eliminación o desactivación del último propietario de un comercio, protegiendo contra comercios huérfanos.
+- **Soporte Auditable de Plataforma (`platform_admins`)**: La tabla `public.platform_admins` y la función `is_platform_admin()` otorgan acceso de soporte técnico auditable sin exponer service keys.
+- **Soft-Delete Financiero**: Facturas y pagos a proveedores utilizan `is_active` y `deleted_at` para preservar comprobantes contables.
+- **Recomendaciones Operativas**: Se recomienda activar Point-in-Time Recovery (PITR) en Supabase para respaldos continuos y habilitar Rate-Limiting/CAPTCHA en Supabase Auth Dashboard.

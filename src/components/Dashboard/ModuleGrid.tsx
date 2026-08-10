@@ -44,7 +44,8 @@ import {
   Globe,
   DollarSign as CurrencyIcon,
   Ticket,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ArrowUpDown
 } from 'lucide-react';
 
 export interface ModuleGroup {
@@ -210,6 +211,8 @@ export const ModuleGrid: React.FC<ModuleGridProps> = ({
 }) => {
   const { activeStore } = useTenant();
 
+  const [moduleSortBy, setModuleSortBy] = useState<'DEFAULT' | 'NAME_ASC' | 'NAME_DESC' | 'FAVORITES_FIRST'>('DEFAULT');
+
   const handleSlugClick = (slug: string) => {
     if (onOpenActionBySlug) {
       onOpenActionBySlug(slug);
@@ -217,6 +220,23 @@ export const ModuleGrid: React.FC<ModuleGridProps> = ({
       const found = MODULE_GROUPS.flatMap(g => g.actions).find(a => a.slug === slug);
       if (found) onActionClick(found);
     }
+  };
+
+  const sortActions = (actions: ActionItem[]) => {
+    return [...actions].sort((a, b) => {
+      if (moduleSortBy === 'NAME_ASC') {
+        return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+      }
+      if (moduleSortBy === 'NAME_DESC') {
+        return b.name.localeCompare(a.name, 'es', { sensitivity: 'base' });
+      }
+      if (moduleSortBy === 'FAVORITES_FIRST') {
+        const aFav = favorites.some(f => f.slug === a.slug) ? 1 : 0;
+        const bFav = favorites.some(f => f.slug === b.slug) ? 1 : 0;
+        return bFav - aFav;
+      }
+      return 0;
+    });
   };
 
   const filteredGroups = MODULE_GROUPS.map(group => {
@@ -228,10 +248,12 @@ export const ModuleGrid: React.FC<ModuleGridProps> = ({
       return matchSearch;
     });
 
+    const sortedMatchedActions = sortActions(matchedActions);
+
     return {
       ...group,
-      isVisible: isCategoryMatched && matchedActions.length > 0,
-      actions: matchedActions
+      isVisible: isCategoryMatched && sortedMatchedActions.length > 0,
+      actions: sortedMatchedActions
     };
   }).filter(group => group.isVisible);
 
@@ -350,6 +372,48 @@ export const ModuleGrid: React.FC<ModuleGridProps> = ({
           <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'var(--theme-sky-bg)', color: '#0ea5e9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Clock size={22} />
           </div>
+        </div>
+      </div>
+
+      {/* Module Cards Sort Bar */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-light)',
+        borderRadius: '0.875rem',
+        padding: '0.75rem 1.25rem',
+        boxShadow: 'var(--shadow-sm)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)' }}>
+          <Layers size={18} style={{ color: 'var(--brand-blue)' }} />
+          <span>Fichas de Módulos Operativos</span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <ArrowUpDown size={14} /> Ordenar Fichas:
+          </span>
+          <select
+            id="select-modulos-orden"
+            value={moduleSortBy}
+            onChange={(e) => setModuleSortBy(e.target.value as any)}
+            style={{
+              padding: '0.4rem 0.75rem',
+              borderRadius: '0.5rem',
+              border: '1px solid #0284c7',
+              background: 'rgba(2, 132, 199, 0.08)',
+              color: '#0284c7',
+              fontWeight: 800,
+              fontSize: '0.8125rem'
+            }}
+          >
+            <option value="DEFAULT">📌 Predeterminado (Por Módulo)</option>
+            <option value="NAME_ASC">🔤 Nombre Ficha (A-Z)</option>
+            <option value="NAME_DESC">🔤 Nombre Ficha (Z-A)</option>
+            <option value="FAVORITES_FIRST">⭐ Favoritos Primero</option>
+          </select>
         </div>
       </div>
 

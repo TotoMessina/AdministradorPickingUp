@@ -25,7 +25,8 @@ import {
   FileCheck,
   TrendingUp,
   Receipt,
-  Check
+  Check,
+  ArrowUpDown
 } from 'lucide-react';
 
 export interface SupplierItem {
@@ -93,6 +94,7 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const [supplierSortBy, setSupplierSortBy] = useState<'MODIFIED_DESC' | 'NAME_ASC' | 'NAME_DESC' | 'CREATED_DESC' | 'BALANCE_DESC' | 'BALANCE_ASC'>('MODIFIED_DESC');
 
   // Modal Form State (Create/Edit Supplier)
   const [isSupplierFormOpen, setIsSupplierFormOpen] = useState(false);
@@ -561,6 +563,30 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
       s.cuit.includes(term);
   });
 
+  const sortedSuppliers = [...filteredSuppliers].sort((a, b) => {
+    if (supplierSortBy === 'NAME_ASC') {
+      return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+    }
+    if (supplierSortBy === 'NAME_DESC') {
+      return b.name.localeCompare(a.name, 'es', { sensitivity: 'base' });
+    }
+    if (supplierSortBy === 'CREATED_DESC') {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeB - timeA;
+    }
+    if (supplierSortBy === 'BALANCE_DESC') {
+      return (Number(b.balance) || 0) - (Number(a.balance) || 0);
+    }
+    if (supplierSortBy === 'BALANCE_ASC') {
+      return (Number(a.balance) || 0) - (Number(b.balance) || 0);
+    }
+    // Default: MODIFIED_DESC
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return timeB - timeA;
+  });
+
   if (!isOpen) return null;
 
   return (
@@ -818,27 +844,57 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
               justifyContent: 'space-between',
               gap: '1rem'
             }}>
-              <div style={{ position: 'relative', flex: 1, maxWidth: '450px' }}>
-                <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                <input
-                  type="text"
-                  placeholder="Buscar por Razón Social, CUIT o Código..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '0.5rem 0.75rem 0.5rem 2.25rem',
-                    borderRadius: '0.5rem',
-                    border: '1px solid var(--border-light)',
-                    background: 'var(--bg-app)',
-                    color: 'var(--text-main)',
-                    fontSize: '0.85rem'
-                  }}
-                />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, maxWidth: '650px' }}>
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Buscar por Razón Social, CUIT o Código..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.5rem 0.75rem 0.5rem 2.25rem',
+                      borderRadius: '0.5rem',
+                      border: '1px solid var(--border-light)',
+                      background: 'var(--bg-app)',
+                      color: 'var(--text-main)',
+                      fontSize: '0.85rem'
+                    }}
+                  />
+                </div>
+
+                {/* Sort Order Selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <ArrowUpDown size={14} /> Ordenar:
+                  </span>
+                  <select
+                    id="select-proveedores-orden"
+                    value={supplierSortBy}
+                    onChange={(e) => setSupplierSortBy(e.target.value as any)}
+                    style={{
+                      padding: '0.5rem 0.875rem',
+                      borderRadius: '0.5rem',
+                      border: '1px solid #ea580c',
+                      background: 'rgba(234, 88, 12, 0.08)',
+                      color: '#ea580c',
+                      fontWeight: 800,
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    <option value="MODIFIED_DESC">🕒 Última Modificación (Nuevos)</option>
+                    <option value="NAME_ASC">🔤 Razón Social (A-Z)</option>
+                    <option value="NAME_DESC">🔤 Razón Social (Z-A)</option>
+                    <option value="CREATED_DESC">📅 Fecha de Creación</option>
+                    <option value="BALANCE_DESC">💸 Mayor Saldo Deudor</option>
+                    <option value="BALANCE_ASC">💚 Menor Saldo / A Favor</option>
+                  </select>
+                </div>
               </div>
 
               <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                Total: <strong>{filteredSuppliers.length} proveedores</strong>
+                Total: <strong>{sortedSuppliers.length} proveedores</strong>
               </div>
             </div>
 
@@ -867,14 +923,14 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredSuppliers.length === 0 ? (
+                    {sortedSuppliers.length === 0 ? (
                       <tr>
                         <td colSpan={6} style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                           No hay proveedores cargados aún en esta sucursal.
                         </td>
                       </tr>
                     ) : (
-                      filteredSuppliers.map(s => {
+                      sortedSuppliers.map(s => {
                         const isDebt = s.balance > 0;
                         const isCredit = s.balance < 0;
 
