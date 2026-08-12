@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.3" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="512" height="512" rx="110" fill="url(#bgGrad)" />
+
+  <!-- Inner Glowing Ring -->
+  <rect x="24" y="24" width="464" height="464" rx="90" fill="none" stroke="rgba(255, 255, 255, 0.12)" stroke-width="8" />
+
+  <!-- Shopping Bag / POS Box Icon -->
+  <g filter="url(#shadow)" transform="translate(106, 110)">
+    <!-- Cart/Box Base -->
+    <path d="M 40 100 L 260 100 L 290 260 C 290 280 270 300 250 300 L 50 300 C 30 300 10 280 10 260 Z" fill="url(#accentGrad)" />
+
+    <!-- Handles -->
+    <path d="M 90 100 C 90 30 210 30 210 100" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" />
+
+    <!-- Bolt / Lightning Zap Symbol inside Bag -->
+    <path d="M 160 140 L 120 220 L 155 220 L 140 280 L 190 190 L 155 190 Z" fill="#ffffff" />
+  </g>
+</svg>

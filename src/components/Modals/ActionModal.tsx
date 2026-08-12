@@ -40,6 +40,11 @@ const POSTerminalModal = lazy(() => import('./POSTerminalModal').then(m => ({ de
 const UserPermissionsModal = lazy(() => import('./UserPermissionsModal').then(m => ({ default: m.UserPermissionsModal })));
 const CajaCentralModal = lazy(() => import('./CajaCentralModal').then(m => ({ default: m.CajaCentralModal })));
 const ConfiguracionModal = lazy(() => import('./ConfiguracionModal').then(m => ({ default: m.ConfiguracionModal })));
+const LabelDesignModal = lazy(() => import('./LabelDesignModal').then(m => ({ default: m.LabelDesignModal })));
+const AccountingExportModal = lazy(() => import('./AccountingExportModal').then(m => ({ default: m.AccountingExportModal })));
+const AIPriceRecommendationsModal = lazy(() => import('./AIPriceRecommendationsModal').then(m => ({ default: m.AIPriceRecommendationsModal })));
+const CustomersManagementModal = lazy(() => import('./CustomersManagementModal').then(m => ({ default: m.CustomersManagementModal })));
+const DesignSystemCatalog = lazy(() => import('../../design-system/DesignSystemCatalog').then(m => ({ default: m.DesignSystemCatalog })));
 const OtrosModal = lazy(() => import('./OtrosModal').then(m => ({ default: m.OtrosModal })));
 
 const ModalFallback = () => (
@@ -206,6 +211,14 @@ export const ActionModal: React.FC<ActionModalProps> = ({ action, onClose, onNav
       setSelectedListId('base');
       fetchSampleData();
       fetchPriceLists();
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
     }
   }, [action, activeStore]);
 
@@ -231,6 +244,22 @@ export const ActionModal: React.FC<ActionModalProps> = ({ action, onClose, onNav
 
   if (slug === 'listas-precios') {
     return <Suspense fallback={<ModalFallback />}><PriceListsModal isOpen={true} onClose={onClose} /></Suspense>;
+  }
+
+  if (slug === 'ai-precios' || slug === 'recomendaciones-ia') {
+    return <Suspense fallback={<ModalFallback />}><AIPriceRecommendationsModal isOpen={true} onClose={onClose} /></Suspense>;
+  }
+
+  if (slug === 'gestion-clientes' || slug === 'clientes' || slug === 'cta-cte-clientes') {
+    return <Suspense fallback={<ModalFallback />}><CustomersManagementModal isOpen={true} onClose={onClose} /></Suspense>;
+  }
+
+  if (slug === 'design-system' || slug === 'componentes' || slug === 'storybook') {
+    return <Suspense fallback={<ModalFallback />}><DesignSystemCatalog isOpen={true} onClose={onClose} /></Suspense>;
+  }
+
+  if (slug === 'diseno-etiquetas' || slug === 'etiquetas') {
+    return <Suspense fallback={<ModalFallback />}><LabelDesignModal isOpen={true} onClose={onClose} /></Suspense>;
   }
 
   if (slug === 'auditoria-precios' || slug === 'price-audit') {
@@ -266,6 +295,10 @@ export const ActionModal: React.FC<ActionModalProps> = ({ action, onClose, onNav
 
   if (slug === 'reportes-analytics' || slug === 'reportes') {
     return <Suspense fallback={<ModalFallback />}><ReportsAnalyticsModal isOpen={true} onClose={onClose} /></Suspense>;
+  }
+
+  if (slug === 'exportaciones' || slug === 'exportacion-contable' || slug === 'citi-ventas') {
+    return <Suspense fallback={<ModalFallback />}><AccountingExportModal isOpen={true} onClose={onClose} /></Suspense>;
   }
 
   if (slug === 'dashboard-ejecutivo' || slug === 'dashboards-recharts') {

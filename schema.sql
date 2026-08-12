@@ -6,35 +6,25 @@
 -- 0. RESET / CLEANUP PREVIOUS DATABASE TABLES, FUNCTIONS & TYPES
 -- ------------------------------------------
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-DROP TRIGGER IF EXISTS set_profiles_updated_at ON public.profiles;
-DROP TRIGGER IF EXISTS check_profile_active_store ON public.profiles;
-DROP TRIGGER IF EXISTS enforce_last_owner ON public.store_members;
-DROP TRIGGER IF EXISTS set_articles_updated_at ON public.articles;
-DROP TRIGGER IF EXISTS set_price_lists_updated_at ON public.price_lists;
-DROP TRIGGER IF EXISTS set_suppliers_updated_at ON public.suppliers;
-DROP TRIGGER IF EXISTS set_cash_registers_updated_at ON public.cash_registers;
-DROP TRIGGER IF EXISTS sync_supplier_balance_invoices ON public.supplier_invoices;
-DROP TRIGGER IF EXISTS sync_supplier_balance_payments ON public.supplier_payments;
-DROP TRIGGER IF EXISTS sync_stock_movement_items ON public.stock_movement_items;
 
-DROP FUNCTION IF EXISTS public.handle_new_user();
-DROP FUNCTION IF EXISTS public.set_updated_at();
-DROP FUNCTION IF EXISTS public.validate_profile_active_store();
-DROP FUNCTION IF EXISTS public.prevent_last_owner_deletion();
-DROP FUNCTION IF EXISTS public.sync_supplier_balance();
-DROP FUNCTION IF EXISTS public.apply_stock_movement();
-DROP FUNCTION IF EXISTS public.get_my_store_ids();
-DROP FUNCTION IF EXISTS public.get_my_admin_store_ids();
-DROP FUNCTION IF EXISTS public.get_my_management_store_ids();
-DROP FUNCTION IF EXISTS public.is_platform_admin();
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+DROP FUNCTION IF EXISTS public.set_updated_at() CASCADE;
+DROP FUNCTION IF EXISTS public.validate_profile_active_store() CASCADE;
+DROP FUNCTION IF EXISTS public.prevent_last_owner_deletion() CASCADE;
+DROP FUNCTION IF EXISTS public.sync_supplier_balance() CASCADE;
+DROP FUNCTION IF EXISTS public.apply_stock_movement() CASCADE;
 
 DROP TABLE IF EXISTS public.notifications CASCADE;
 DROP TABLE IF EXISTS public.price_audit_logs CASCADE;
+DROP TABLE IF EXISTS public.sales_items CASCADE;
+DROP TABLE IF EXISTS public.sales CASCADE;
+DROP TABLE IF EXISTS public.sales_closures CASCADE;
 DROP TABLE IF EXISTS public.stock_movement_items CASCADE;
 DROP TABLE IF EXISTS public.stock_movements CASCADE;
 DROP TABLE IF EXISTS public.supplier_payments CASCADE;
 DROP TABLE IF EXISTS public.supplier_invoices CASCADE;
 DROP TABLE IF EXISTS public.suppliers CASCADE;
+DROP TABLE IF EXISTS public.customers CASCADE;
 DROP TABLE IF EXISTS public.cash_registers CASCADE;
 DROP TABLE IF EXISTS public.price_list_items CASCADE;
 DROP TABLE IF EXISTS public.price_lists CASCADE;
@@ -124,6 +114,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     avatar_url TEXT,
     role public.user_role_type DEFAULT 'operador',
     active_store_id UUID REFERENCES public.stores(id) ON DELETE SET NULL,
+    theme_preference TEXT DEFAULT 'system',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -142,34 +133,93 @@ RETURNS BOOLEAN AS $$
     SELECT 1 FROM public.platform_admins
     WHERE user_id = auth.uid()
   );
-$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+$$ LANGUAGE sql STABLE PARALLEL SAFE SECURITY DEFINER SET search_path = public, pg_temp;
 
--- Helper: Get store IDs where current user is an active member OR platform admin
+-- Helper: Get store IDs where current user is an active member OR platform admin (Optimized with set_config transaction cache & JWT claims)
 CREATE OR REPLACE FUNCTION public.get_my_store_ids()
 RETURNS SETOF UUID AS $$
-  SELECT store_id FROM public.store_members
-  WHERE user_id = auth.uid() AND is_active = true
-  UNION
-  SELECT id FROM public.stores WHERE public.is_platform_admin();
-$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+DECLARE
+  _cached TEXT;
+  _claims_ids JSONB;
+BEGIN
+  -- 1. Try transaction memory cache
+  _cached := current_setting('request.my_store_ids', true);
+  IF _cached IS NOT NULL AND _cached <> '' THEN
+    RETURN QUERY SELECT unnest(string_to_array(_cached, ',')::UUID[]);
+    RETURN;
+  END IF;
 
--- Helper: Get store IDs where current user is owner/admin OR platform admin
+  -- 2. Try JWT claims fallback
+  _claims_ids := COALESCE(
+    auth.jwt() -> 'app_metadata' -> 'store_ids',
+    auth.jwt() -> 'user_metadata' -> 'store_ids'
+  );
+  IF _claims_ids IS NOT NULL AND jsonb_array_length(_claims_ids) > 0 THEN
+    PERFORM set_config('request.my_store_ids', array_to_string(ARRAY(SELECT jsonb_array_elements_text(_claims_ids)), ','), true);
+    RETURN QUERY SELECT jsonb_array_elements_text(_claims_ids)::UUID;
+    RETURN;
+  END IF;
+
+  -- 3. Query store_members with index and cache result for transaction
+  IF public.is_platform_admin() THEN
+    PERFORM set_config('request.my_store_ids', array_to_string(ARRAY(SELECT id FROM public.stores), ','), true);
+    RETURN QUERY SELECT id FROM public.stores;
+  ELSE
+    PERFORM set_config('request.my_store_ids', array_to_string(ARRAY(
+      SELECT store_id FROM public.store_members WHERE user_id = auth.uid() AND is_active = true
+    ), ','), true);
+    RETURN QUERY SELECT store_id FROM public.store_members WHERE user_id = auth.uid() AND is_active = true;
+  END IF;
+END;
+$$ LANGUAGE plpgsql STABLE PARALLEL SAFE SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- Helper: Get store IDs where current user is owner/admin OR platform admin (Optimized with set_config transaction cache)
 CREATE OR REPLACE FUNCTION public.get_my_admin_store_ids()
 RETURNS SETOF UUID AS $$
-  SELECT store_id FROM public.store_members
-  WHERE user_id = auth.uid() AND role IN ('owner', 'admin') AND is_active = true
-  UNION
-  SELECT id FROM public.stores WHERE public.is_platform_admin();
-$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+DECLARE
+  _cached TEXT;
+BEGIN
+  _cached := current_setting('request.my_admin_store_ids', true);
+  IF _cached IS NOT NULL AND _cached <> '' THEN
+    RETURN QUERY SELECT unnest(string_to_array(_cached, ',')::UUID[]);
+    RETURN;
+  END IF;
 
--- Helper: Get store IDs where current user is owner/admin/supervisor OR platform admin
+  IF public.is_platform_admin() THEN
+    PERFORM set_config('request.my_admin_store_ids', array_to_string(ARRAY(SELECT id FROM public.stores), ','), true);
+    RETURN QUERY SELECT id FROM public.stores;
+  ELSE
+    PERFORM set_config('request.my_admin_store_ids', array_to_string(ARRAY(
+      SELECT store_id FROM public.store_members WHERE user_id = auth.uid() AND role IN ('owner', 'admin') AND is_active = true
+    ), ','), true);
+    RETURN QUERY SELECT store_id FROM public.store_members WHERE user_id = auth.uid() AND role IN ('owner', 'admin') AND is_active = true;
+  END IF;
+END;
+$$ LANGUAGE plpgsql STABLE PARALLEL SAFE SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- Helper: Get store IDs where current user is owner/admin/supervisor OR platform admin (Optimized with set_config transaction cache)
 CREATE OR REPLACE FUNCTION public.get_my_management_store_ids()
 RETURNS SETOF UUID AS $$
-  SELECT store_id FROM public.store_members
-  WHERE user_id = auth.uid() AND role IN ('owner', 'admin', 'supervisor') AND is_active = true
-  UNION
-  SELECT id FROM public.stores WHERE public.is_platform_admin();
-$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+DECLARE
+  _cached TEXT;
+BEGIN
+  _cached := current_setting('request.my_mgmt_store_ids', true);
+  IF _cached IS NOT NULL AND _cached <> '' THEN
+    RETURN QUERY SELECT unnest(string_to_array(_cached, ',')::UUID[]);
+    RETURN;
+  END IF;
+
+  IF public.is_platform_admin() THEN
+    PERFORM set_config('request.my_mgmt_store_ids', array_to_string(ARRAY(SELECT id FROM public.stores), ','), true);
+    RETURN QUERY SELECT id FROM public.stores;
+  ELSE
+    PERFORM set_config('request.my_mgmt_store_ids', array_to_string(ARRAY(
+      SELECT store_id FROM public.store_members WHERE user_id = auth.uid() AND role IN ('owner', 'admin', 'supervisor') AND is_active = true
+    ), ','), true);
+    RETURN QUERY SELECT store_id FROM public.store_members WHERE user_id = auth.uid() AND role IN ('owner', 'admin', 'supervisor') AND is_active = true;
+  END IF;
+END;
+$$ LANGUAGE plpgsql STABLE PARALLEL SAFE SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- Generic Trigger: Refresh updated_at timestamp
 CREATE OR REPLACE FUNCTION public.set_updated_at()
@@ -839,6 +889,49 @@ CREATE TRIGGER sync_supplier_balance_payments
 
 
 -- ------------------------------------------
+-- 10.5. CUSTOMERS TABLE (Store Multi-Tenant)
+-- ------------------------------------------
+CREATE TABLE IF NOT EXISTS public.customers (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE NOT NULL,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    cuit TEXT,
+    phone TEXT,
+    email TEXT,
+    address TEXT,
+    balance NUMERIC(12,2) DEFAULT 0.00,
+    loyalty_points INT DEFAULT 0 CHECK (loyalty_points >= 0),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(store_id, code)
+);
+
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS set_customers_updated_at ON public.customers;
+CREATE TRIGGER set_customers_updated_at
+  BEFORE UPDATE ON public.customers
+  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
+
+DROP POLICY IF EXISTS "Customers viewable by store members" ON public.customers;
+CREATE POLICY "Customers viewable by store members"
+    ON public.customers FOR SELECT
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()));
+
+DROP POLICY IF EXISTS "Customers manageable by store management" ON public.customers;
+CREATE POLICY "Customers manageable by store management"
+    ON public.customers FOR ALL
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_management_store_ids()))
+    WITH CHECK (store_id IN (SELECT public.get_my_management_store_ids()));
+
+
+-- ------------------------------------------
 -- 11. SYSTEM NOTIFICATIONS TABLE (Multi-Tenant)
 -- ------------------------------------------
 CREATE TABLE IF NOT EXISTS public.notifications (
@@ -936,9 +1029,15 @@ CREATE TABLE IF NOT EXISTS public.cash_movements (
     concept TEXT,
     register_code TEXT,
     created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE public.cash_movements ENABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS set_cash_movements_updated_at ON public.cash_movements;
+CREATE TRIGGER set_cash_movements_updated_at
+  BEFORE UPDATE ON public.cash_movements
+  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
 DROP POLICY IF EXISTS "Cash movements viewable by store members" ON public.cash_movements;
 CREATE POLICY "Cash movements viewable by store members"
@@ -976,26 +1075,6 @@ CREATE POLICY "Bank accounts manageable by store admins"
     USING (store_id IN (SELECT public.get_my_admin_store_ids()))
     WITH CHECK (store_id IN (SELECT public.get_my_admin_store_ids()));
 
-CREATE TABLE IF NOT EXISTS public.currency_rates (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE NOT NULL,
-    currency TEXT NOT NULL,
-    symbol TEXT DEFAULT '$',
-    rate NUMERIC(12,4) DEFAULT 1.00 CHECK (rate > 0),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-ALTER TABLE public.currency_rates ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Currency rates viewable by store members" ON public.currency_rates;
-CREATE POLICY "Currency rates viewable by store members"
-    ON public.currency_rates FOR SELECT TO authenticated
-    USING (store_id IN (SELECT public.get_my_store_ids()));
-
-DROP POLICY IF EXISTS "Currency rates manageable by store management" ON public.currency_rates;
-CREATE POLICY "Currency rates manageable by store management"
-    ON public.currency_rates FOR ALL TO authenticated
-    USING (store_id IN (SELECT public.get_my_management_store_ids()))
-    WITH CHECK (store_id IN (SELECT public.get_my_management_store_ids()));
 
 CREATE TABLE IF NOT EXISTS public.cash_flows (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -1005,9 +1084,15 @@ CREATE TABLE IF NOT EXISTS public.cash_flows (
     concept TEXT,
     amount NUMERIC(12,2) DEFAULT 0,
     created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE public.cash_flows ENABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS set_cash_flows_updated_at ON public.cash_flows;
+CREATE TRIGGER set_cash_flows_updated_at
+  BEFORE UPDATE ON public.cash_flows
+  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
 DROP POLICY IF EXISTS "Cash flows viewable by store members" ON public.cash_flows;
 CREATE POLICY "Cash flows viewable by store members"
@@ -1029,9 +1114,15 @@ CREATE TABLE IF NOT EXISTS public.purchase_vouchers (
     status public.purchase_voucher_status_enum DEFAULT 'Activo',
     created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(store_id, code)
 );
 ALTER TABLE public.purchase_vouchers ENABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS set_purchase_vouchers_updated_at ON public.purchase_vouchers;
+CREATE TRIGGER set_purchase_vouchers_updated_at
+  BEFORE UPDATE ON public.purchase_vouchers
+  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
 DROP POLICY IF EXISTS "Purchase vouchers viewable by store members" ON public.purchase_vouchers;
 CREATE POLICY "Purchase vouchers viewable by store members"
@@ -1076,9 +1167,15 @@ CREATE TABLE IF NOT EXISTS public.custom_properties (
     field_name TEXT NOT NULL,
     field_type TEXT DEFAULT 'Texto',
     is_required BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE public.custom_properties ENABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS set_custom_properties_updated_at ON public.custom_properties;
+CREATE TRIGGER set_custom_properties_updated_at
+  BEFORE UPDATE ON public.custom_properties
+  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
 DROP POLICY IF EXISTS "Custom properties viewable by store members" ON public.custom_properties;
 CREATE POLICY "Custom properties viewable by store members"
@@ -1093,9 +1190,413 @@ CREATE POLICY "Custom properties manageable by store admins"
 
 
 -- ------------------------------------------
+-- 13.5 POS SALES, ITEMS & CASH CLOSURES (Store Multi-Tenant)
+-- ------------------------------------------
+CREATE TABLE IF NOT EXISTS public.sales (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE NOT NULL,
+    register_id UUID REFERENCES public.cash_registers(id) ON DELETE SET NULL,
+    cashier_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    ticket_number TEXT,
+    cashier_email TEXT,
+    customer_id UUID REFERENCES public.customers(id) ON DELETE SET NULL,
+    customer_name TEXT,
+    invoice_type TEXT,
+    price_list_id UUID REFERENCES public.price_lists(id) ON DELETE SET NULL,
+    total_amount NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (total_amount >= 0),
+    discount_amount NUMERIC(12,2) DEFAULT 0.00 CHECK (discount_amount >= 0),
+    payment_method public.payment_method_enum DEFAULT 'Efectivo',
+    card_tariff_id UUID REFERENCES public.card_tariffs(id) ON DELETE SET NULL,
+    voucher_id UUID REFERENCES public.purchase_vouchers(id) ON DELETE SET NULL,
+    status TEXT DEFAULT 'Completada',
+    synced_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.sales ENABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS set_sales_updated_at ON public.sales;
+CREATE TRIGGER set_sales_updated_at
+  BEFORE UPDATE ON public.sales
+  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
+
+DROP POLICY IF EXISTS "Sales viewable by store members" ON public.sales;
+CREATE POLICY "Sales viewable by store members"
+    ON public.sales FOR SELECT
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()));
+
+DROP POLICY IF EXISTS "Sales manageable by store members" ON public.sales;
+CREATE POLICY "Sales manageable by store members"
+    ON public.sales FOR ALL
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()))
+    WITH CHECK (store_id IN (SELECT public.get_my_store_ids()));
+
+CREATE TABLE IF NOT EXISTS public.sales_items (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    sale_id UUID REFERENCES public.sales(id) ON DELETE CASCADE NOT NULL,
+    article_id UUID REFERENCES public.articles(id) ON DELETE SET NULL,
+    article_code TEXT NOT NULL,
+    article_description TEXT NOT NULL,
+    qty NUMERIC(10,2) NOT NULL DEFAULT 1 CHECK (qty > 0),
+    unit_price NUMERIC(10,2) NOT NULL CHECK (unit_price >= 0),
+    cost_price NUMERIC(10,2) DEFAULT 0 CHECK (cost_price >= 0),
+    discount_percent NUMERIC(5,2) DEFAULT 0 CHECK (discount_percent BETWEEN 0 AND 100),
+    total_price NUMERIC(12,2) NOT NULL CHECK (total_price >= 0),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.sales_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Sales items viewable by store members" ON public.sales_items;
+CREATE POLICY "Sales items viewable by store members"
+    ON public.sales_items FOR SELECT
+    TO authenticated
+    USING (
+      sale_id IN (
+        SELECT s.id FROM public.sales s
+        WHERE s.store_id IN (SELECT public.get_my_store_ids())
+      )
+    );
+
+DROP POLICY IF EXISTS "Sales items manageable by store members" ON public.sales_items;
+CREATE POLICY "Sales items manageable by store members"
+    ON public.sales_items FOR ALL
+    TO authenticated
+    USING (
+      sale_id IN (
+        SELECT s.id FROM public.sales s
+        WHERE s.store_id IN (SELECT public.get_my_store_ids())
+      )
+    )
+    WITH CHECK (
+      sale_id IN (
+        SELECT s.id FROM public.sales s
+        WHERE s.store_id IN (SELECT public.get_my_store_ids())
+      )
+    );
+
+CREATE TABLE IF NOT EXISTS public.sales_closures (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE NOT NULL,
+    register_id UUID REFERENCES public.cash_registers(id) ON DELETE SET NULL,
+    cashier_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    opened_at TIMESTAMPTZ,
+    closed_at TIMESTAMPTZ DEFAULT NOW(),
+    opening_amount NUMERIC(12,2) DEFAULT 0.00,
+    closing_amount NUMERIC(12,2) DEFAULT 0.00,
+    total_sales NUMERIC(12,2) DEFAULT 0.00,
+    total_transactions INT DEFAULT 0,
+    difference NUMERIC(12,2) DEFAULT 0.00,
+    notes TEXT,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.sales_closures ENABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS set_sales_closures_updated_at ON public.sales_closures;
+CREATE TRIGGER set_sales_closures_updated_at
+  BEFORE UPDATE ON public.sales_closures
+  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
+
+DROP POLICY IF EXISTS "Sales closures viewable by store members" ON public.sales_closures;
+CREATE POLICY "Sales closures viewable by store members"
+    ON public.sales_closures FOR SELECT
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()));
+
+DROP POLICY IF EXISTS "Sales closures manageable by store management" ON public.sales_closures;
+CREATE POLICY "Sales closures manageable by store management"
+    ON public.sales_closures FOR ALL
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_management_store_ids()))
+    WITH CHECK (store_id IN (SELECT public.get_my_management_store_ids()));
+
+CREATE TABLE IF NOT EXISTS public.push_subscriptions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    endpoint TEXT UNIQUE NOT NULL,
+    keys JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Push subscriptions manageable by store members" ON public.push_subscriptions;
+CREATE POLICY "Push subscriptions manageable by store members"
+    ON public.push_subscriptions FOR ALL
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()))
+    WITH CHECK (store_id IN (SELECT public.get_my_store_ids()));
+
+CREATE TABLE IF NOT EXISTS public.label_templates (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE NOT NULL,
+    name TEXT NOT NULL,
+    width_mm NUMERIC(6,2) DEFAULT 50,
+    height_mm NUMERIC(6,2) DEFAULT 30,
+    elements JSONB NOT NULL,
+    is_default BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.label_templates ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Label templates manageable by store members" ON public.label_templates;
+CREATE POLICY "Label templates manageable by store members"
+    ON public.label_templates FOR ALL
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()))
+    WITH CHECK (store_id IN (SELECT public.get_my_store_ids()));
+
+CREATE TABLE IF NOT EXISTS public.notifications (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    type TEXT DEFAULT 'info',
+    is_read BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Notifications viewable by store members" ON public.notifications;
+CREATE POLICY "Notifications viewable by store members"
+    ON public.notifications FOR ALL
+    TO authenticated
+    USING (store_id IS NULL OR store_id IN (SELECT public.get_my_store_ids()))
+    WITH CHECK (store_id IS NULL OR store_id IN (SELECT public.get_my_store_ids()));
+
+CREATE TABLE IF NOT EXISTS public.currency_rates (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE NOT NULL,
+    currency_code TEXT NOT NULL,
+    currency_name TEXT NOT NULL,
+    rate_to_ars NUMERIC(12,4) NOT NULL DEFAULT 1.0,
+    source TEXT DEFAULT 'API DolarApi / BCRA',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(store_id, currency_code)
+);
+
+ALTER TABLE public.currency_rates ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Currency rates manageable by store members" ON public.currency_rates;
+CREATE POLICY "Currency rates manageable by store members"
+    ON public.currency_rates FOR ALL
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()))
+    WITH CHECK (store_id IN (SELECT public.get_my_store_ids()));
+
+-- ------------------------------------------
+-- 13.5. HISTORICAL ARCHIVE TABLES & AUTOMATED PROCEDURE
+-- ------------------------------------------
+CREATE TABLE IF NOT EXISTS public.sales_archive (
+    id UUID PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE,
+    register_id UUID,
+    cashier_id UUID,
+    price_list_id UUID,
+    total_amount NUMERIC(12,2),
+    discount_amount NUMERIC(12,2),
+    payment_method public.payment_method_enum,
+    card_tariff_id UUID,
+    voucher_id UUID,
+    status TEXT,
+    synced_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.sales_archive ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Sales archive viewable by store members" ON public.sales_archive;
+CREATE POLICY "Sales archive viewable by store members"
+    ON public.sales_archive FOR SELECT
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()));
+
+CREATE TABLE IF NOT EXISTS public.sales_items_archive (
+    id UUID PRIMARY KEY,
+    sale_id UUID,
+    article_id UUID,
+    article_code TEXT,
+    article_description TEXT,
+    qty NUMERIC(10,2),
+    unit_price NUMERIC(10,2),
+    discount_percent NUMERIC(5,2),
+    total_price NUMERIC(12,2),
+    created_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.sales_items_archive ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Sales items archive viewable by store members" ON public.sales_items_archive;
+CREATE POLICY "Sales items archive viewable by store members"
+    ON public.sales_items_archive FOR SELECT
+    TO authenticated
+    USING (
+      sale_id IN (
+        SELECT sa.id FROM public.sales_archive sa
+        WHERE sa.store_id IN (SELECT public.get_my_store_ids())
+      )
+    );
+
+CREATE TABLE IF NOT EXISTS public.stock_movements_archive (
+    id UUID PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE,
+    movement_type public.stock_movement_enum,
+    observations TEXT,
+    total_units NUMERIC(10,2),
+    created_by UUID,
+    created_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.stock_movements_archive ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Stock movements archive viewable by store members" ON public.stock_movements_archive;
+CREATE POLICY "Stock movements archive viewable by store members"
+    ON public.stock_movements_archive FOR SELECT
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()));
+
+CREATE TABLE IF NOT EXISTS public.stock_movement_items_archive (
+    id UUID PRIMARY KEY,
+    movement_id UUID,
+    article_id UUID,
+    article_code TEXT,
+    article_description TEXT,
+    qty NUMERIC(10,2),
+    unit_price NUMERIC(10,2),
+    total_price NUMERIC(12,2),
+    created_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.stock_movement_items_archive ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Stock movement items archive viewable by store members" ON public.stock_movement_items_archive;
+CREATE POLICY "Stock movement items archive viewable by store members"
+    ON public.stock_movement_items_archive FOR SELECT
+    TO authenticated
+    USING (
+      movement_id IN (
+        SELECT sma.id FROM public.stock_movements_archive sma
+        WHERE sma.store_id IN (SELECT public.get_my_store_ids())
+      )
+    );
+
+CREATE TABLE IF NOT EXISTS public.price_audit_logs_archive (
+    id UUID PRIMARY KEY,
+    store_id UUID REFERENCES public.stores(id) ON DELETE CASCADE,
+    article_id UUID,
+    article_code TEXT,
+    article_description TEXT,
+    price_list_name TEXT,
+    old_price NUMERIC(12,2),
+    new_price NUMERIC(12,2),
+    reason TEXT,
+    user_email TEXT,
+    created_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.price_audit_logs_archive ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Price audit logs archive viewable by store members" ON public.price_audit_logs_archive;
+CREATE POLICY "Price audit logs archive viewable by store members"
+    ON public.price_audit_logs_archive FOR SELECT
+    TO authenticated
+    USING (store_id IN (SELECT public.get_my_store_ids()));
+
+-- Procedure: Archive old records > p_months
+CREATE OR REPLACE FUNCTION public.archive_old_records(
+  p_months INT DEFAULT 24
+)
+RETURNS JSONB AS $$
+DECLARE
+  _cutoff TIMESTAMPTZ := NOW() - (p_months || ' months')::INTERVAL;
+  _sales_count INT := 0;
+  _movements_count INT := 0;
+  _audit_count INT := 0;
+BEGIN
+  -- 1. Archive Sales & Items
+  WITH old_sales AS (
+    SELECT * FROM public.sales WHERE created_at < _cutoff
+  ),
+  ins_sales AS (
+    INSERT INTO public.sales_archive (id, store_id, register_id, cashier_id, price_list_id, total_amount, discount_amount, payment_method, card_tariff_id, voucher_id, status, synced_at, created_at, updated_at)
+    SELECT id, store_id, register_id, cashier_id, price_list_id, total_amount, discount_amount, payment_method, card_tariff_id, voucher_id, status, synced_at, created_at, updated_at
+    FROM old_sales
+    ON CONFLICT (id) DO NOTHING
+  ),
+  ins_items AS (
+    INSERT INTO public.sales_items_archive (id, sale_id, article_id, article_code, article_description, qty, unit_price, discount_percent, total_price, created_at)
+    SELECT i.id, i.sale_id, i.article_id, i.article_code, i.article_description, i.qty, i.unit_price, i.discount_percent, i.total_price, i.created_at
+    FROM public.sales_items i JOIN old_sales s ON i.sale_id = s.id
+    ON CONFLICT (id) DO NOTHING
+  ),
+  del_sales AS (
+    DELETE FROM public.sales WHERE created_at < _cutoff RETURNING id
+  )
+  SELECT COUNT(*) INTO _sales_count FROM del_sales;
+
+  -- 2. Archive Stock Movements
+  WITH old_movements AS (
+    SELECT * FROM public.stock_movements WHERE created_at < _cutoff
+  ),
+  ins_movs AS (
+    INSERT INTO public.stock_movements_archive (id, store_id, movement_type, observations, total_units, created_by, created_at)
+    SELECT id, store_id, movement_type, observations, total_units, created_by, created_at
+    FROM old_movements
+    ON CONFLICT (id) DO NOTHING
+  ),
+  ins_mov_items AS (
+    INSERT INTO public.stock_movement_items_archive (id, movement_id, article_id, article_code, article_description, qty, unit_price, total_price, created_at)
+    SELECT mi.id, mi.movement_id, mi.article_id, mi.article_code, mi.article_description, mi.qty, mi.unit_price, mi.total_price, mi.created_at
+    FROM public.stock_movement_items mi JOIN old_movements m ON mi.movement_id = m.id
+    ON CONFLICT (id) DO NOTHING
+  ),
+  del_movs AS (
+    DELETE FROM public.stock_movements WHERE created_at < _cutoff RETURNING id
+  )
+  SELECT COUNT(*) INTO _movements_count FROM del_movs;
+
+  -- 3. Archive Price Audit Logs
+  WITH old_audit AS (
+    SELECT * FROM public.price_audit_logs WHERE created_at < _cutoff
+  ),
+  ins_audit AS (
+    INSERT INTO public.price_audit_logs_archive (id, store_id, article_id, article_code, article_description, price_list_name, old_price, new_price, reason, user_email, created_at)
+    SELECT id, store_id, article_id, article_code, article_description, price_list_name, old_price, new_price, reason, user_email, created_at
+    FROM old_audit
+    ON CONFLICT (id) DO NOTHING
+  ),
+  del_audit AS (
+    DELETE FROM public.price_audit_logs WHERE created_at < _cutoff RETURNING id
+  )
+  SELECT COUNT(*) INTO _audit_count FROM del_audit;
+
+  RETURN jsonb_build_object(
+    'status', 'success',
+    'cutoff_date', _cutoff,
+    'archived_sales', _sales_count,
+    'archived_stock_movements', _movements_count,
+    'archived_price_audit_logs', _audit_count
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+
+-- ------------------------------------------
 -- 14. PERFORMANCE OPTIMIZATION INDEXES
 -- ------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_store_members_user_active ON public.store_members(user_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_store_members_user_role_active ON public.store_members(user_id, role, is_active);
 CREATE INDEX IF NOT EXISTS idx_store_members_store_id ON public.store_members(store_id);
 
 CREATE INDEX IF NOT EXISTS idx_articles_store_id ON public.articles(store_id);
@@ -1116,6 +1617,12 @@ CREATE INDEX IF NOT EXISTS idx_suppliers_store_id ON public.suppliers(store_id);
 CREATE INDEX IF NOT EXISTS idx_supplier_invoices_store_supplier ON public.supplier_invoices(store_id, supplier_id);
 CREATE INDEX IF NOT EXISTS idx_supplier_payments_store_supplier ON public.supplier_payments(store_id, supplier_id);
 
+CREATE INDEX IF NOT EXISTS idx_customers_store_id ON public.customers(store_id);
+CREATE INDEX IF NOT EXISTS idx_customers_code ON public.customers(store_id, code);
+CREATE INDEX IF NOT EXISTS idx_customers_fts ON public.customers 
+USING gin(to_tsvector('spanish', name || ' ' || COALESCE(cuit, '') || ' ' || code));
+CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON public.sales(customer_id);
+
 CREATE INDEX IF NOT EXISTS idx_notifications_store_user ON public.notifications(store_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON public.notifications(store_id, user_id) WHERE is_read = false;
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON public.notifications(store_id, created_at DESC);
@@ -1132,6 +1639,24 @@ CREATE INDEX IF NOT EXISTS idx_cash_flows_store_id ON public.cash_flows(store_id
 CREATE INDEX IF NOT EXISTS idx_purchase_vouchers_store_id ON public.purchase_vouchers(store_id);
 CREATE INDEX IF NOT EXISTS idx_discount_rules_store_id ON public.discount_rules(store_id);
 CREATE INDEX IF NOT EXISTS idx_custom_properties_store_id ON public.custom_properties(store_id);
+
+CREATE INDEX IF NOT EXISTS idx_sales_store_id ON public.sales(store_id);
+CREATE INDEX IF NOT EXISTS idx_sales_register_id ON public.sales(register_id);
+CREATE INDEX IF NOT EXISTS idx_sales_ticket_number ON public.sales(store_id, ticket_number);
+CREATE INDEX IF NOT EXISTS idx_sales_created_at ON public.sales(store_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON public.sales_items(sale_id);
+CREATE INDEX IF NOT EXISTS idx_sales_items_article_id ON public.sales_items(article_id);
+
+CREATE INDEX IF NOT EXISTS idx_sales_closures_store_id ON public.sales_closures(store_id);
+CREATE INDEX IF NOT EXISTS idx_sales_closures_register_id ON public.sales_closures(register_id);
+
+-- Full-text search sobre articles
+CREATE INDEX IF NOT EXISTS idx_articles_fts ON public.articles 
+USING gin(to_tsvector('spanish', description || ' ' || code));
+
+-- Para suppliers
+CREATE INDEX IF NOT EXISTS idx_suppliers_fts ON public.suppliers 
+USING gin(to_tsvector('spanish', name || ' ' || COALESCE(cuit, '')));
 
 
 -- ------------------------------------------
@@ -1161,7 +1686,8 @@ INSERT INTO public.module_actions (module_id, name, slug, icon, sort_order) VALU
 ((SELECT id FROM m), 'Cambio Puntual', 'cambio-puntual', 'Edit3', 1),
 ((SELECT id FROM m), 'Cambio Masivo', 'cambio-masivo', 'Zap', 2),
 ((SELECT id FROM m), 'Listas de Precios', 'listas-precios', 'List', 3),
-((SELECT id FROM m), 'Cambio Rápido', 'cambio-rapido', 'RefreshCw', 4);
+((SELECT id FROM m), 'Cambio Rápido', 'cambio-rapido', 'RefreshCw', 4),
+((SELECT id FROM m), 'Recomendaciones IA', 'ai-precios', 'Sparkles', 5);
 
 -- Distribuciones
 WITH m AS (
@@ -1205,7 +1731,8 @@ INSERT INTO public.module_actions (module_id, name, slug, icon, sort_order) VALU
 ((SELECT id FROM m), 'Cuenta Corriente', 'prov-cta-cte', 'CreditCard', 1),
 ((SELECT id FROM m), 'Ingreso de Comprobantes', 'ingreso-comprobantes', 'FileText', 2),
 ((SELECT id FROM m), 'Gestión de Proveedores', 'gestion-proveedores', 'Users', 3),
-((SELECT id FROM m), 'Admin Cta Cte', 'admin-cta-cte', 'Settings', 4);
+((SELECT id FROM m), 'Admin Cta Cte', 'admin-cta-cte', 'Settings', 4),
+((SELECT id FROM m), 'Gestión de Clientes', 'gestion-clientes', 'UserCheck', 5);
 
 -- Reportes
 WITH m AS (
@@ -1239,7 +1766,8 @@ INSERT INTO public.module_actions (module_id, name, slug, icon, sort_order) VALU
 ((SELECT id FROM m), 'Diseño de Etiquetas', 'diseno-etiquetas', 'Sliders', 2),
 ((SELECT id FROM m), 'Bonificaciones', 'bonificaciones', 'Gift', 3),
 ((SELECT id FROM m), 'Propiedades MM', 'propiedades-mm', 'Cpu', 4),
-((SELECT id FROM m), 'Configuración BackEnd', 'configuracion-backend', 'Database', 5);
+((SELECT id FROM m), 'Configuración BackEnd', 'configuracion-backend', 'Database', 5),
+((SELECT id FROM m), 'Design System', 'design-system', 'Sparkles', 6);
 
 -- Otros
 WITH m AS (
@@ -1269,3 +1797,7 @@ INSERT INTO public.notifications (store_id, title, message, type, is_read) VALUE
 ('11111111-1111-1111-1111-111111111111', '¡Bienvenido a PickingUp! Administración', 'Tu comercio PICKING & DELIVERING UP! S.A. está activo con arquitectura aislada.', 'success', false),
 ('11111111-1111-1111-1111-111111111111', 'Aislamiento Multi-Tenant Activo', 'Tus datos de precios, cajas y productos son 100% privados e independientes.', 'info', false)
 ON CONFLICT DO NOTHING;
+
+ALTER PUBLICATION supabase_realtime ADD TABLE public.sales;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.articles;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;

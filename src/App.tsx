@@ -14,6 +14,9 @@ import { MobileAppView } from './components/Mobile/MobileAppView';
 import { initShepherdTour } from './services/ShepherdTourService';
 import { OnboardingTutorialModal } from './components/Modals/OnboardingTutorialModal';
 import { APP_CONFIG } from './config/appConfig';
+import { registerServiceWorker } from './services/ServiceWorkerRegister';
+import { PWAInstallPrompt } from './components/PWAInstallPrompt';
+import { SkipLink } from './components/Layout/SkipLink';
 import {
   TrendingUp,
   Activity,
@@ -114,6 +117,7 @@ export const AppContent: React.FC = () => {
   });
 
   useEffect(() => {
+    registerServiceWorker();
     const handleResize = () => {
       setIsMobileView(window.innerWidth < 768);
     };
@@ -163,10 +167,44 @@ export const AppContent: React.FC = () => {
   const [serverLatency, setServerLatency] = useState<string>('12 ms');
   const [isServerOnline, setIsServerOnline] = useState<boolean>(true);
 
-  // Apply theme attribute to html element
+  // Apply theme attribute to html element & sync with localStorage
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    try {
+      localStorage.setItem('pickingup_theme', theme);
+    } catch {}
   }, [theme]);
+
+  // Sync theme preference from Supabase user profile on login
+  useEffect(() => {
+    if (user?.id && !isDemoMode) {
+      supabase.from('profiles').select('theme_preference').eq('id', user.id).single()
+        .then((res: any) => {
+          if (!res.error && res.data?.theme_preference && (res.data.theme_preference === 'light' || res.data.theme_preference === 'dark')) {
+            setTheme(res.data.theme_preference);
+          }
+        });
+    }
+  }, [user?.id, isDemoMode]);
+
+  // Listen to OS system color scheme changes (prefers-color-scheme)
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleSystemThemeChange = (e: MediaQueryListEvent) => {
+      const hasExplicitLocalPref = localStorage.getItem('pickingup_theme');
+      if (!hasExplicitLocalPref) {
+        setTheme(e.matches ? 'dark' : 'light');
+      }
+    };
+    try {
+      mediaQuery.addEventListener('change', handleSystemThemeChange);
+      return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
+    } catch {
+      mediaQuery.addListener(handleSystemThemeChange);
+      return () => mediaQuery.removeListener(handleSystemThemeChange);
+    }
+  }, []);
 
   // Fetch real-time dashboard metrics (Operaciones Hoy, Cajas Activas, Last Update, Server Status)
   useEffect(() => {
@@ -327,6 +365,14 @@ export const AppContent: React.FC = () => {
       try {
         localStorage.setItem('pickingup_theme', next);
       } catch {}
+
+      if (user?.id && !isDemoMode) {
+        supabase.from('profiles').update({ theme_preference: next }).eq('id', user.id)
+          .then(() => {
+            // Updated successfully
+          });
+      }
+
       return next;
     });
   };
@@ -484,6 +530,9 @@ export const AppContent: React.FC = () => {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-app)' }}>
+      {/* Accessibility Skip to Content Link */}
+      <SkipLink />
+
       {/* Top Header */}
       <Header
         theme={theme}
@@ -508,14 +557,19 @@ export const AppContent: React.FC = () => {
         />
 
         {/* Main Content Area */}
-        <main style={{
-          flex: 1,
-          padding: '1.5rem 2rem',
-          maxWidth: '1600px',
-          margin: '0 auto',
-          width: '100%',
-          background: 'var(--bg-app)'
-        }}>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          role="main"
+          style={{
+            flex: 1,
+            padding: '1.5rem 2rem',
+            maxWidth: '1600px',
+            margin: '0 auto',
+            width: '100%',
+            background: 'var(--bg-app)'
+          }}
+        >
           {/* Favorites / Fast Access Bar */}
           <FavoritesBar
             favorites={favorites}
@@ -603,6 +657,9 @@ export const AppContent: React.FC = () => {
         isOpen={isTutorialOpen}
         onClose={() => setIsTutorialOpen(false)}
       />
+
+      {/* PWA Floating Install Prompt */}
+      <PWAInstallPrompt />
     </div>
   );
 };

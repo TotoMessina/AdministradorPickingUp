@@ -1,0 +1,54 @@
+{
+  "name": "PickingUp! Enterprise POS & Administración",
+  "short_name": "PickingUp! POS",
+  "description": "Portal de administración multi-comercio y terminal de venta POS offline enterprise.",
+  "start_url": "/",
+  "id": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#0284c7",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": [
+    "business",
+    "productivity",
+    "finance",
+    "shopping"
+  ],
+  "shortcuts": [
+    {
+      "name": "Terminal POS",
+      "short_name": "POS",
+      "description": "Abrir terminal de venta en caja registradora POS",
+      "url": "/?action=pos",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Reportes & Analytics",
+      "short_name": "Reportes",
+      "description": "Abrir centro de métricas y estadísticas",
+      "url": "/?action=reports",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    }
+  ]
+}

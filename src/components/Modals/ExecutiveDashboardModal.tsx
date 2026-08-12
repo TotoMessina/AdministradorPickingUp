@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { supabase, isValidUUID } from '../../lib/supabase';
+import { initRealtimeMultiStoreChannels } from '../../services/RealtimeMultiStoreService';
 import {
   X,
   TrendingUp,
@@ -14,7 +15,15 @@ import {
   Landmark,
   CheckCircle2,
   PackageCheck,
-  Inbox
+  Inbox,
+  AlertTriangle,
+  Clock,
+  PieChart as PieIcon,
+  Percent,
+  Flame,
+  Zap,
+  Layers,
+  ChevronRight
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -42,13 +51,14 @@ interface RealSaleItem {
   description: string;
   qty: number;
   unitPrice: number;
+  costPrice?: number;
   subtotal: number;
   category?: string;
 }
 
 interface RealSaleRecord {
   id: string;
-  ticketNumber: number;
+  ticketNumber: string | number;
   date: string;
   total: number;
   subtotal: number;
@@ -60,14 +70,16 @@ interface RealSaleRecord {
   storeId?: string;
 }
 
-const CHART_COLORS = ['#0284c7', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#64748b'];
+const CHART_COLORS = ['#0284c7', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#64748b', '#ef4444'];
+const DAYS_OF_WEEK = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const HOURS_SLOTS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 
 export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = ({ isOpen, onClose }) => {
   const { activeStore } = useTenant();
   const { user, isDemoMode } = useAuth();
   const storeKey = activeStore?.id || 'demo-store';
 
-  const [activeTab, setActiveTab] = useState<'sales' | 'sellers' | 'products' | 'cash' | 'intelligence'>('sales');
+  const [activeTab, setActiveTab] = useState<'sales' | 'category_roi' | 'heatmap' | 'stock_alerts' | 'sellers' | 'cash'>('sales');
   const [periodFilter, setPeriodFilter] = useState<'TODAY' | '7D' | '30D' | 'MONTH' | 'ALL'>('ALL');
 
   // Strictly Real Data State
@@ -75,10 +87,21 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
   const [salesHistory, setSalesHistory] = useState<RealSaleRecord[]>([]);
   const [cashRegisters, setCashRegisters] = useState<any[]>([]);
   const [cashMovements, setCashMovements] = useState<any[]>([]);
-
   useEffect(() => {
     if (isOpen) {
       loadStrictRealData();
+    }
+
+    if (isOpen && activeStore?.isRealDbStore && isValidUUID(activeStore.id) && user && !isDemoMode) {
+      const manager = initRealtimeMultiStoreChannels({
+        storeId: activeStore.id,
+        onSalesChange: () => loadStrictRealData(),
+        onStockChange: () => loadStrictRealData()
+      });
+
+      return () => {
+        manager.unsubscribeAll();
+      };
     }
   }, [isOpen, activeStore]);
 
@@ -103,38 +126,81 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
           .eq('store_id', activeStore.id);
         if (dbRegisters && dbRegisters.length > 0) loadedRegisters = dbRegisters;
 
-        const { data: dbMovements } = await supabase
-          .from('stock_movements')
-          .select('*, stock_movement_items(*)')
+        // Query public.sales & public.sales_items
+        const { data: dbSales } = await supabase
+          .from('sales')
+          .select('*, sales_items(*)')
           .eq('store_id', activeStore.id)
-          .eq('movement_type', 'Egreso')
           .order('created_at', { ascending: false });
 
-        if (dbMovements && dbMovements.length > 0) {
-          loadedSales = dbMovements.map((sm: any, idx: number) => {
-            const items: RealSaleItem[] = (sm.stock_movement_items || []).map((smi: any) => ({
-              code: smi.article_code || 'ART',
-              description: smi.article_description || 'Artículo',
-              qty: Number(smi.qty) || 1,
-              unitPrice: Number(smi.unit_price) || 0,
-              subtotal: Number(smi.total_price) || (Number(smi.qty || 1) * Number(smi.unit_price || 0)),
-              category: 'General'
-            }));
-            const calculatedTotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+        if (dbSales && dbSales.length > 0) {
+          loadedSales = dbSales.map((s: any, idx: number) => {
+            const items: RealSaleItem[] = (s.sales_items || []).map((si: any) => {
+              const matchedArt = loadedArticles.find(a => a.code === si.article_code);
+              return {
+                code: si.article_code || 'ART',
+                description: si.article_description || 'Artículo',
+                qty: Number(si.qty) || 1,
+                unitPrice: Number(si.unit_price) || 0,
+                costPrice: Number(si.cost_price ?? matchedArt?.cost) || 0,
+                subtotal: Number(si.total_price) || (Number(si.qty || 1) * Number(si.unit_price || 0)),
+                category: matchedArt?.category || 'General'
+              };
+            });
+            const calculatedTotal = Number(s.total_amount) || items.reduce((sum, item) => sum + item.subtotal, 0);
 
             return {
-              id: sm.id || `db-sale-${idx}`,
-              ticketNumber: sm.ticket_number || (100 + idx),
-              date: sm.created_at || new Date().toISOString(),
+              id: s.id || `db-sale-${idx}`,
+              ticketNumber: s.ticket_number || (100 + idx),
+              date: s.created_at || new Date().toISOString(),
               total: calculatedTotal,
               subtotal: calculatedTotal,
-              paymentMethod: sm.payment_method || 'Efectivo',
-              cashierName: sm.created_by_email || user.email?.split('@')[0] || 'Operador',
-              registerName: sm.register_name || 'Caja POS',
+              paymentMethod: s.payment_method || 'Efectivo',
+              cashierName: s.cashier_email || user.email?.split('@')[0] || 'Operador POS',
+              registerName: 'Caja POS',
               items,
               storeId: activeStore.id
             };
           });
+        } else {
+          // Fallback: Stock Movements Egreso if sales table was empty
+          const { data: dbMovements } = await supabase
+            .from('stock_movements')
+            .select('*, stock_movement_items(*)')
+            .eq('store_id', activeStore.id)
+            .eq('movement_type', 'Egreso')
+            .order('created_at', { ascending: false });
+
+          if (dbMovements && dbMovements.length > 0) {
+            loadedSales = dbMovements.map((sm: any, idx: number) => {
+              const items: RealSaleItem[] = (sm.stock_movement_items || []).map((smi: any) => {
+                const matchedArt = loadedArticles.find(a => a.code === smi.article_code);
+                return {
+                  code: smi.article_code || 'ART',
+                  description: smi.article_description || 'Artículo',
+                  qty: Number(smi.qty) || 1,
+                  unitPrice: Number(smi.unit_price) || 0,
+                  costPrice: Number(matchedArt?.cost) || 0,
+                  subtotal: Number(smi.total_price) || (Number(smi.qty || 1) * Number(smi.unit_price || 0)),
+                  category: matchedArt?.category || 'General'
+                };
+              });
+              const calculatedTotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+
+              return {
+                id: sm.id || `db-sale-${idx}`,
+                ticketNumber: sm.ticket_number || (100 + idx),
+                date: sm.created_at || new Date().toISOString(),
+                total: calculatedTotal,
+                subtotal: calculatedTotal,
+                paymentMethod: sm.payment_method || 'Efectivo',
+                cashierName: sm.created_by_email || user.email?.split('@')[0] || 'Operador',
+                registerName: sm.register_name || 'Caja POS',
+                items,
+                storeId: activeStore.id
+              };
+            });
+          }
         }
       } catch (e) {
         console.warn('Error fetching Supabase db records:', e);
@@ -203,12 +269,12 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
     });
   }, [salesHistory, periodFilter]);
 
-  // Real KPIs (Zero when no sales)
+  // Real KPIs
   const totalSalesAmount = useMemo(() => filteredSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0), [filteredSales]);
   const totalTransactionsCount = filteredSales.length;
   const averageTicketValue = totalTransactionsCount > 0 ? Math.round(totalSalesAmount / totalTransactionsCount) : 0;
 
-  // 1. Strict Sales Time Series Data
+  // 1. Daily / Monthly Revenue Time Series Data
   const salesTimeSeriesData = useMemo(() => {
     if (filteredSales.length === 0) return [];
 
@@ -252,7 +318,87 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
     }));
   }, [filteredSales, periodFilter]);
 
-  // 2. Strict Payment Methods Distribution
+  // 2. Category ROI Analysis Data
+  const categoryROIData = useMemo(() => {
+    const catMap: Record<string, { category: string; revenue: number; cost: number; units: number }> = {};
+
+    filteredSales.forEach(sale => {
+      (sale.items || []).forEach(item => {
+        const cat = item.category || 'General';
+        if (!catMap[cat]) {
+          catMap[cat] = { category: cat, revenue: 0, cost: 0, units: 0 };
+        }
+        const qty = Number(item.qty) || 1;
+        const sub = Number(item.subtotal) || (qty * Number(item.unitPrice || 0));
+        const matchedArt = articles.find(a => a.code === item.code);
+        const unitCost = Number(item.costPrice ?? matchedArt?.cost) || 0;
+        const totalCost = qty * unitCost;
+
+        catMap[cat].revenue += sub;
+        catMap[cat].cost += totalCost;
+        catMap[cat].units += qty;
+      });
+    });
+
+    return Object.values(catMap).map(c => {
+      const grossProfit = c.revenue - c.cost;
+      const roiPercent = c.cost > 0 ? (grossProfit / c.cost) * 100 : (c.revenue > 0 ? 100 : 0);
+      const profitMarginPercent = c.revenue > 0 ? (grossProfit / c.revenue) * 100 : 0;
+      return {
+        ...c,
+        grossProfit,
+        roiPercent,
+        profitMarginPercent
+      };
+    }).sort((a, b) => b.revenue - a.revenue);
+  }, [filteredSales, articles]);
+
+  // 3. Rush Hours Heatmap Matrix Data (Days x Hours)
+  const heatmapMatrix = useMemo(() => {
+    // 7 days x 15 hour slots (8 to 22)
+    const grid: number[][] = Array.from({ length: 7 }, () => Array(HOURS_SLOTS.length).fill(0));
+    let maxCount = 1;
+
+    filteredSales.forEach(sale => {
+      const d = new Date(sale.date);
+      const dayIdx = d.getDay(); // 0 = Dom, 6 = Sáb
+      const hour = d.getHours();
+      const hourIdx = HOURS_SLOTS.indexOf(hour);
+      if (hourIdx >= 0) {
+        grid[dayIdx][hourIdx] += 1;
+        if (grid[dayIdx][hourIdx] > maxCount) {
+          maxCount = grid[dayIdx][hourIdx];
+        }
+      }
+    });
+
+    return { grid, maxCount };
+  }, [filteredSales]);
+
+  // 4. Automatic Low Stock Alerts
+  const lowStockAlerts = useMemo(() => {
+    return articles.filter(a => {
+      const stock = Number(a.stock) || 0;
+      const minStock = Number(a.min_stock) || 5;
+      return stock <= minStock;
+    }).map(a => {
+      const stock = Number(a.stock) || 0;
+      const minStock = Number(a.min_stock) || 5;
+      const needed = Math.max(1, minStock - stock);
+      const isCritical = stock === 0;
+      return {
+        code: a.code,
+        description: a.description,
+        category: a.category || 'General',
+        stock,
+        minStock,
+        needed,
+        isCritical
+      };
+    }).sort((a, b) => a.stock - b.stock);
+  }, [articles]);
+
+  // 5. Payment Methods Distribution
   const paymentMethodsData = useMemo(() => {
     if (filteredSales.length === 0) return [];
     const pMap: Record<string, number> = {};
@@ -269,7 +415,7 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
     }));
   }, [filteredSales]);
 
-  // 3. Strict Salesperson / Cashier Performance
+  // 6. Salesperson Performance
   const sellersPerformanceData = useMemo(() => {
     if (filteredSales.length === 0) return [];
     const sellerMap: Record<string, { ventas: number; tickets: number }> = {};
@@ -292,31 +438,7 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
     })).sort((a, b) => b.ventas - a.ventas);
   }, [filteredSales]);
 
-  // 4. Strict Top Products
-  const topProductsData = useMemo(() => {
-    if (filteredSales.length === 0) return [];
-    const prodMap: Record<string, { name: string; unidades: number; ingresos: number; rubro: string }> = {};
-
-    filteredSales.forEach(s => {
-      (s.items || []).forEach(item => {
-        const key = item.code || item.description;
-        if (!prodMap[key]) {
-          prodMap[key] = {
-            name: item.description || item.code,
-            unidades: 0,
-            ingresos: 0,
-            rubro: item.category || 'General'
-          };
-        }
-        prodMap[key].unidades += Number(item.qty) || 1;
-        prodMap[key].ingresos += Number(item.subtotal) || (Number(item.qty || 1) * Number(item.unitPrice || 0));
-      });
-    });
-
-    return Object.values(prodMap).sort((a, b) => b.unidades - a.unidades).slice(0, 10);
-  }, [filteredSales]);
-
-  // 5. Strict Cash Register Control
+  // 7. Cash Control
   const cashControlData = useMemo(() => {
     if (cashRegisters.length === 0 && filteredSales.length === 0) return [];
 
@@ -361,7 +483,7 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
     ];
   }, [cashRegisters, filteredSales, cashMovements]);
 
-  // Strict Real Catalog Valuation
+  // Catalog Valuation
   const inventoryValuation = useMemo(() => {
     return articles.reduce((sum, a) => {
       const stock = Number(a.stock) || 0;
@@ -381,15 +503,20 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
       salesTimeSeriesData.forEach(row => {
         csvRows.push(`"${row.time}",${row.ventas},${row.tickets},${row.promedio}`);
       });
+    } else if (activeTab === 'category_roi') {
+      csvRows.push('Categoria,Facturacion_Total ($),Costo_Estimado ($),Utilidad_Bruta ($),ROI_Porcentaje');
+      categoryROIData.forEach(row => {
+        csvRows.push(`"${row.category}",${row.revenue.toFixed(2)},${row.cost.toFixed(2)},${row.grossProfit.toFixed(2)},${row.roiPercent.toFixed(1)}%`);
+      });
+    } else if (activeTab === 'stock_alerts') {
+      csvRows.push('Codigo,Descripcion,Rubro,Stock_Actual,Stock_Minimo,Unidades_A_Reponer,Estado');
+      lowStockAlerts.forEach(row => {
+        csvRows.push(`"${row.code}","${row.description}","${row.category}",${row.stock},${row.minStock},${row.needed},"${row.isCritical ? 'AGOTADO' : 'CRITICO'}"`);
+      });
     } else if (activeTab === 'sellers') {
       csvRows.push('Vendedor/Cajero,Total Ventas ($),Tickets Emitidos,Ticket Promedio ($),Meta %');
       sellersPerformanceData.forEach(row => {
         csvRows.push(`"${row.name}",${row.ventas},${row.tickets},${row.ticketProm},${row.meta}%`);
-      });
-    } else if (activeTab === 'products') {
-      csvRows.push('Producto,Rubro,Unidades Vendidas,Ingresos Generados ($)');
-      topProductsData.forEach(row => {
-        csvRows.push(`"${row.name}","${row.rubro}",${row.unidades},${row.ingresos}`);
       });
     } else if (activeTab === 'cash') {
       csvRows.push('Caja Terminal,Fondo Inicial,Ventas Efectivo,Egresos,Saldo Actual,Estado');
@@ -466,7 +593,7 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase'
               }}>
-                <Sparkles size={13} /> TABLERO EJECUTIVO REAL — RECHARTS & ANALYTICS
+                <Sparkles size={13} /> TABLERO EJECUTIVO COMPLETO — VENTAS REALES
               </div>
               <h2 style={{ fontSize: '1.35rem', fontWeight: 900, margin: '2px 0 0 0', color: '#ffffff' }}>
                 Métricas de Mi Comercio — {activeStore?.name || 'Mi Negocio'}
@@ -555,10 +682,11 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
         }}>
           {[
             { id: 'sales', label: 'Ventas & Facturación Real', icon: <TrendingUp size={16} /> },
+            { id: 'category_roi', label: 'ROI por Categoría', icon: <Percent size={16} /> },
+            { id: 'heatmap', label: 'Mapa Horarios Pico', icon: <Flame size={16} /> },
+            { id: 'stock_alerts', label: `Alertas Stock (${lowStockAlerts.length})`, icon: <AlertTriangle size={16} /> },
             { id: 'sellers', label: 'Rendimiento Vendedores', icon: <Users size={16} /> },
-            { id: 'products', label: 'Productos Más Vendidos', icon: <ShoppingBag size={16} /> },
-            { id: 'cash', label: 'Control de Caja & Tesorería', icon: <Landmark size={16} /> },
-            { id: 'intelligence', label: 'Inteligencia de Negocio', icon: <Sparkles size={16} /> }
+            { id: 'cash', label: 'Control de Caja & Tesorería', icon: <Landmark size={16} /> }
           ].map(tab => {
             const isActive = activeTab === tab.id;
             return (
@@ -675,16 +803,16 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
               boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.04)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#64748b', fontSize: '0.8125rem', fontWeight: 700 }}>
-                <span>VALOR DE CATÁLOGO</span>
-                <div style={{ background: '#dcfce7', color: '#15803d', padding: '0.25rem 0.5rem', borderRadius: '0.375rem', fontSize: '0.75rem', fontWeight: 800 }}>
-                  {articles.length} Artículos
+                <span>STOCK BAJO MÍNIMO</span>
+                <div style={{ background: lowStockAlerts.length > 0 ? '#fee2e2' : '#dcfce7', color: lowStockAlerts.length > 0 ? '#dc2626' : '#166534', padding: '0.25rem 0.5rem', borderRadius: '0.375rem', fontSize: '0.75rem', fontWeight: 800 }}>
+                  {lowStockAlerts.length} Críticos
                 </div>
               </div>
-              <div style={{ fontSize: '1.75rem', fontWeight: 900, color: '#10b981', margin: '0.5rem 0 0.25rem 0' }}>
-                ${inventoryValuation.toLocaleString('es-AR')}
+              <div style={{ fontSize: '1.75rem', fontWeight: 900, color: lowStockAlerts.length > 0 ? '#ef4444' : '#10b981', margin: '0.5rem 0 0.25rem 0' }}>
+                {lowStockAlerts.length} alértas
               </div>
               <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 500 }}>
-                Valor de stock activo en tienda
+                Artículos que requieren reposición
               </div>
             </div>
           </div>
@@ -811,7 +939,258 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
             </div>
           )}
 
-          {/* TAB 2: RENDIMIENTO VENDEDORES */}
+          {/* TAB 2: ROI POR CATEGORÍA */}
+          {activeTab === 'category_roi' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '1rem',
+                padding: '1.5rem'
+              }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: '0 0 1.25rem 0', color: '#0f172a' }}>
+                  Retorno de Inversión (ROI) y Utilidad Bruta por Categoría de Producto
+                </h3>
+
+                {categoryROIData.length === 0 ? (
+                  <div style={{ padding: '3rem 1rem', textAlign: 'center', background: '#f8fafc', borderRadius: '0.75rem', border: '1px dashed #cbd5e1' }}>
+                    <Percent size={40} style={{ color: '#94a3b8', marginBottom: '0.5rem' }} />
+                    <div style={{ fontWeight: 800, color: '#475569', fontSize: '1rem' }}>No hay ventas registradas por categoría</div>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid #e2e8f0', textTransform: 'uppercase', fontSize: '0.75rem', color: '#64748b' }}>
+                          <th style={{ padding: '0.75rem', textAlign: 'left' }}>Categoría / Rubro</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'center' }}>Unidades Vendidas</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'right' }}>Facturación Total ($)</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'right' }}>Costo Estimado ($)</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'right' }}>Utilidad Bruta ($)</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'center' }}>ROI %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {categoryROIData.map((c, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '0.875rem 0.75rem', fontWeight: 800, color: '#0f172a' }}>
+                              {c.category}
+                            </td>
+                            <td style={{ padding: '0.875rem 0.75rem', textAlign: 'center', fontWeight: 700 }}>
+                              {c.units} u.
+                            </td>
+                            <td style={{ padding: '0.875rem 0.75rem', textAlign: 'right', fontWeight: 800, color: '#0284c7' }}>
+                              ${c.revenue.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td style={{ padding: '0.875rem 0.75rem', textAlign: 'right', color: '#64748b' }}>
+                              ${c.cost.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td style={{ padding: '0.875rem 0.75rem', textAlign: 'right', fontWeight: 900, color: c.grossProfit >= 0 ? '#10b981' : '#ef4444' }}>
+                              ${c.grossProfit.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td style={{ padding: '0.875rem 0.75rem', textAlign: 'center' }}>
+                              <span style={{
+                                padding: '0.25rem 0.65rem',
+                                borderRadius: '9999px',
+                                background: c.roiPercent >= 50 ? '#dcfce7' : (c.roiPercent > 0 ? '#fef3c7' : '#fee2e2'),
+                                color: c.roiPercent >= 50 ? '#15803d' : (c.roiPercent > 0 ? '#b45309' : '#dc2626'),
+                                fontWeight: 900,
+                                fontSize: '0.78125rem'
+                              }}>
+                                {c.roiPercent.toFixed(1)}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: MAPA DE CALOR DE HORARIOS PICO */}
+          {activeTab === 'heatmap' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '1rem',
+                padding: '1.5rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+                  <div>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Flame style={{ color: '#f59e0b' }} /> Mapa de Calor de Horarios Pico de Venta
+                    </h3>
+                    <div style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '4px' }}>
+                      Intensidad de afluencia y operaciones comerciales por día de la semana y franja horaria.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <div style={{ minWidth: '700px' }}>
+                    {/* Header Hours Row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '80px repeat(15, 1fr)', gap: '4px', marginBottom: '6px' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#64748b' }}>Día / Hora</div>
+                      {HOURS_SLOTS.map(h => (
+                        <div key={h} style={{ fontSize: '0.725rem', fontWeight: 700, color: '#64748b', textAlign: 'center' }}>
+                          {h}:00
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Matrix Rows */}
+                    {DAYS_OF_WEEK.map((dayName, dayIdx) => (
+                      <div key={dayName} style={{ display: 'grid', gridTemplateColumns: '80px repeat(15, 1fr)', gap: '4px', marginBottom: '4px' }}>
+                        <div style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center' }}>
+                          {dayName}
+                        </div>
+                        {HOURS_SLOTS.map((h, hIdx) => {
+                          const count = heatmapMatrix.grid[dayIdx][hIdx];
+                          const intensity = heatmapMatrix.maxCount > 0 ? count / heatmapMatrix.maxCount : 0;
+                          
+                          let bg = '#f1f5f9';
+                          let textColor = '#64748b';
+                          if (count > 0) {
+                            if (intensity > 0.7) {
+                              bg = '#ef4444';
+                              textColor = '#ffffff';
+                            } else if (intensity > 0.4) {
+                              bg = '#f59e0b';
+                              textColor = '#ffffff';
+                            } else {
+                              bg = '#38bdf8';
+                              textColor = '#ffffff';
+                            }
+                          }
+
+                          return (
+                            <div
+                              key={h}
+                              title={`${dayName} ${h}:00 hs - ${count} ventas`}
+                              style={{
+                                height: '38px',
+                                borderRadius: '0.375rem',
+                                background: bg,
+                                color: textColor,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.75rem',
+                                fontWeight: 800,
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              {count > 0 ? count : ''}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginTop: '1.25rem', fontSize: '0.75rem', color: '#64748b' }}>
+                  <span style={{ fontWeight: 800 }}>Leyenda de Intensidad:</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <div style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#f1f5f9' }} /> Sin ventas
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <div style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#38bdf8' }} /> Moderado
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <div style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#f59e0b' }} /> Concurrencia Alta
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <div style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#ef4444' }} /> Horario Pico Máximo
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: ALERTAS AUTOMÁTICAS DE STOCK BAJO */}
+          {activeTab === 'stock_alerts' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '1rem',
+                padding: '1.5rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+                  <div>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <AlertTriangle style={{ color: '#ef4444' }} /> Alertas Automáticas de Reposición Urgente
+                    </h3>
+                    <div style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '4px' }}>
+                      Detección inteligente de artículos por debajo de la reserva mínima calculada.
+                    </div>
+                  </div>
+                  <div style={{ background: '#fee2e2', color: '#dc2626', padding: '0.35rem 0.75rem', borderRadius: '0.5rem', fontWeight: 900, fontSize: '0.8125rem' }}>
+                    {lowStockAlerts.length} Productos Críticos
+                  </div>
+                </div>
+
+                {lowStockAlerts.length === 0 ? (
+                  <div style={{ padding: '3rem 1rem', textAlign: 'center', background: '#f8fafc', borderRadius: '0.75rem', border: '1px dashed #cbd5e1' }}>
+                    <CheckCircle2 size={40} style={{ color: '#10b981', marginBottom: '0.5rem' }} />
+                    <div style={{ fontWeight: 800, color: '#166534', fontSize: '1rem' }}>¡Excelente! Todo el stock está en niveles óptimos.</div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+                    {lowStockAlerts.map(art => (
+                      <div
+                        key={art.code}
+                        style={{
+                          background: art.isCritical ? '#fef2f2' : '#ffffff',
+                          border: art.isCritical ? '1px solid #fca5a5' : '1px solid #e2e8f0',
+                          borderRadius: '0.875rem',
+                          padding: '1rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 800, color: art.isCritical ? '#dc2626' : '#b45309', background: art.isCritical ? '#fee2e2' : '#fef3c7', padding: '0.15rem 0.5rem', borderRadius: '0.375rem' }}>
+                              {art.isCritical ? 'AGOTADO (0 u.)' : 'STOCK BAJO'}
+                            </span>
+                            <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>Código: {art.code}</span>
+                          </div>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.25rem 0', color: '#0f172a' }}>
+                            {art.description}
+                          </h4>
+                          <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Rubro: {art.category}</div>
+                        </div>
+
+                        <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div>
+                            <div style={{ fontSize: '0.725rem', color: '#64748b' }}>Stock / Mínimo</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: 900, color: '#0f172a' }}>
+                              {art.stock} u. / {art.minStock} u.
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '0.725rem', color: '#64748b' }}>Reponer Mínimo</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: 900, color: '#dc2626' }}>
+                              +{art.needed} u.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: RENDIMIENTO VENDEDORES */}
           {activeTab === 'sellers' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               <div style={{
@@ -888,89 +1267,7 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
             </div>
           )}
 
-          {/* TAB 3: PRODUCTOS MÁS VENDIDOS */}
-          {activeTab === 'products' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              <div style={{
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '1rem',
-                padding: '1.5rem'
-              }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: '0 0 1.25rem 0', color: '#0f172a' }}>
-                  Top Productos Reales por Unidades Vendidas
-                </h3>
-                {topProductsData.length === 0 ? (
-                  <div style={{ padding: '3rem 1rem', textAlign: 'center', background: '#f8fafc', borderRadius: '0.75rem', border: '1px dashed #cbd5e1' }}>
-                    <ShoppingBag size={36} style={{ color: '#94a3b8', marginBottom: '0.5rem' }} />
-                    <div style={{ fontWeight: 700, color: '#475569' }}>No hay ventas de productos en este periodo</div>
-                  </div>
-                ) : (
-                  <div style={{ width: '100%', height: 320 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={topProductsData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} interval={0} angle={-15} textAnchor="end" height={60} />
-                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} />
-                        <Tooltip formatter={(v: any) => [`${v} unidades`, 'Volumen Real']} contentStyle={{ background: '#0f172a', borderRadius: '0.75rem', border: 'none', color: '#ffffff' }} />
-                        <Bar dataKey="unidades" fill="#06b6d4" radius={[8, 8, 0, 0]} name="Unidades Vendidas" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </div>
-
-              {topProductsData.length > 0 && (
-                <div style={{
-                  background: '#ffffff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '1rem',
-                  padding: '1.5rem',
-                  overflowX: 'auto'
-                }}>
-                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 1rem 0', color: '#0f172a' }}>
-                    Ranking de Facturación Real por Producto
-                  </h3>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid #e2e8f0', textTransform: 'uppercase', fontSize: '0.75rem', color: '#64748b' }}>
-                        <th style={{ padding: '0.75rem', textAlign: 'left' }}>#</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'left' }}>Descripción de Producto</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'left' }}>Rubro</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'right' }}>Unidades</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'right' }}>Facturación Acumulada ($)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topProductsData.map((p, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '0.875rem 0.75rem', fontWeight: 800, color: '#0284c7' }}>
-                            #{i + 1}
-                          </td>
-                          <td style={{ padding: '0.875rem 0.75rem', fontWeight: 700, color: '#0f172a' }}>
-                            {p.name}
-                          </td>
-                          <td style={{ padding: '0.875rem 0.75rem', color: '#64748b' }}>
-                            <span style={{ background: '#f1f5f9', padding: '0.2rem 0.5rem', borderRadius: '0.375rem', fontSize: '0.75rem', fontWeight: 700 }}>
-                              {p.rubro}
-                            </span>
-                          </td>
-                          <td style={{ padding: '0.875rem 0.75rem', textAlign: 'right', fontWeight: 700 }}>
-                            {p.unidades}
-                          </td>
-                          <td style={{ padding: '0.875rem 0.75rem', textAlign: 'right', fontWeight: 900, color: '#10b981' }}>
-                            ${p.ingresos.toLocaleString('es-AR')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 4: CONTROL DE CAJA */}
+          {/* TAB 6: CONTROL DE CAJA */}
           {activeTab === 'cash' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               <div style={{
@@ -1040,62 +1337,6 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
             </div>
           )}
 
-          {/* TAB 5: INTELIGENCIA DE NEGOCIO */}
-          {activeTab === 'intelligence' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.5rem' }}>
-              <div style={{
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '1rem',
-                padding: '1.5rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                  <Sparkles style={{ color: '#0284c7' }} />
-                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                    Proyección Real al Cierre de Mes
-                  </h3>
-                </div>
-                {totalTransactionsCount === 0 ? (
-                  <p style={{ fontSize: '0.875rem', color: '#64748b' }}>
-                    Sin ventas registradas en el periodo seleccionado para proyectar el cierre.
-                  </p>
-                ) : (
-                  <>
-                    <p style={{ fontSize: '0.875rem', color: '#64748b', lineHeight: 1.5 }}>
-                      Basado en las <strong>{totalTransactionsCount} ventas reales</strong> capturadas con un promedio de <strong>${Math.round(totalSalesAmount / Math.max(1, salesTimeSeriesData.length)).toLocaleString('es-AR')}/día</strong>.
-                    </p>
-                    <div style={{ background: '#e0f2fe', borderRadius: '0.75rem', padding: '1rem', marginTop: '1rem' }}>
-                      <div style={{ fontSize: '0.75rem', color: '#0369a1', fontWeight: 800, textTransform: 'uppercase' }}>Proyección Estimada</div>
-                      <div style={{ fontSize: '1.25rem', color: '#0c4a6e', fontWeight: 900, marginTop: '4px' }}>
-                        ${Math.round((totalSalesAmount / Math.max(1, salesTimeSeriesData.length)) * 30).toLocaleString('es-AR')}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div style={{
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '1rem',
-                padding: '1.5rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                  <PackageCheck style={{ color: '#10b981' }} />
-                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                    Valor de Catálogo Real
-                  </h3>
-                </div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 900, color: '#0f172a' }}>
-                  ${inventoryValuation.toLocaleString('es-AR')}
-                </div>
-                <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '4px 0 1rem 0' }}>
-                  Valor total del stock físico cargado en {articles.length} artículos en la tienda.
-                </p>
-              </div>
-            </div>
-          )}
-
         </div>
 
         {/* Footer */}
@@ -1109,7 +1350,7 @@ export const ExecutiveDashboardModal: React.FC<ExecutiveDashboardModalProps> = (
         }}>
           <div style={{ fontSize: '0.8125rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <CheckCircle2 size={16} style={{ color: '#10b981' }} />
-            Conectado a datos reales del POS y Supabase ({activeStore?.name || 'Tienda Principal'})
+            Conectado a datos de ventas reales de Supabase ({activeStore?.name || 'Tienda Principal'})
           </div>
 
           <button

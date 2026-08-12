@@ -13,6 +13,7 @@ export interface OfflineSaleRecord {
   id: string;
   store_id: string;
   cashier_email: string;
+  customer_id?: string;
   customer_name: string;
   invoice_type: string;
   payment_method: string;
@@ -204,15 +205,124 @@ export const syncOfflineSalesWithSupabase = async (storeId: string): Promise<{ s
 
   for (const sale of pendingSales) {
     try {
-      // 1. Insert Stock Movements in Supabase
+      // 1. Idempotency / Duplicate Check
+      let isAlreadySynced = false;
+
+      if (isValidUUID(sale.id)) {
+        const { data: existing } = await supabase
+          .from('sales')
+          .select('id')
+          .eq('id', sale.id)
+          .maybeSingle();
+        if (existing) {
+          isAlreadySynced = true;
+        }
+      }
+
+      if (!isAlreadySynced && sale.id) {
+        const { data: existingByTicket } = await supabase
+          .from('sales')
+          .select('id')
+          .eq('store_id', storeId)
+          .eq('ticket_number', sale.id)
+          .maybeSingle();
+        if (existingByTicket) {
+          isAlreadySynced = true;
+        }
+      }
+
+      if (isAlreadySynced) {
+        // Sale already present in Supabase -> Mark local record synced and skip duplicate insertion
+        try {
+          const db = await initOfflineDB();
+          const tx = db.transaction('sales_queue', 'readwrite');
+          const store = tx.objectStore('sales_queue');
+          sale.synced = 1;
+          store.put(sale);
+        } catch {}
+
+        syncedCount++;
+        continue;
+      }
+
+      // 2. Map & Insert into public.sales
+      const validSaleId = isValidUUID(sale.id) ? sale.id : crypto.randomUUID();
+
+      let validPaymentMethod = 'Efectivo';
+      if (['Efectivo', 'Transferencia', 'Cheque', 'Tarjeta'].includes(sale.payment_method)) {
+        validPaymentMethod = sale.payment_method;
+      } else if (sale.payment_method === 'Debito' || sale.payment_method === 'Credito') {
+        validPaymentMethod = 'Tarjeta';
+      }
+
+      const salePayload = {
+        id: validSaleId,
+        store_id: storeId,
+        ticket_number: sale.id,
+        cashier_email: sale.cashier_email,
+        customer_id: (sale.customer_id && isValidUUID(sale.customer_id)) ? sale.customer_id : null,
+        customer_name: sale.customer_name || 'Consumidor Final',
+        invoice_type: sale.invoice_type || 'Ticket X',
+        payment_method: validPaymentMethod,
+        price_list_id: isValidUUID(sale.price_list_id) ? sale.price_list_id : null,
+        total_amount: sale.total,
+        status: 'Completada',
+        synced_at: new Date().toISOString(),
+        created_at: sale.created_at || new Date().toISOString()
+      };
+
+      const { error: saleErr } = await supabase
+        .from('sales')
+        .insert([salePayload]);
+
+      if (saleErr) {
+        console.warn('Error inserting sale into Supabase public.sales:', saleErr);
+      }
+
+      // 3. Insert items into public.sales_items
+      if (sale.items && sale.items.length > 0) {
+        const codes = sale.items.map(i => i.code);
+        const { data: dbArts } = await supabase
+          .from('articles')
+          .select('id, code, cost')
+          .eq('store_id', storeId)
+          .in('code', codes);
+
+        const artMap = new Map((dbArts || []).map((a: any) => [a.code, a]));
+
+        const itemInserts = sale.items.map(item => {
+          const artInfo = artMap.get(item.code);
+          return {
+            sale_id: validSaleId,
+            article_id: artInfo?.id || null,
+            article_code: item.code,
+            article_description: item.description,
+            qty: item.qty,
+            unit_price: item.unitPrice,
+            cost_price: Number(artInfo?.cost) || 0,
+            total_price: item.subtotal,
+            created_at: sale.created_at || new Date().toISOString()
+          };
+        });
+
+        const { error: itemsErr } = await supabase
+          .from('sales_items')
+          .insert(itemInserts);
+
+        if (itemsErr) {
+          console.warn('Error inserting items into Supabase public.sales_items:', itemsErr);
+        }
+      }
+
+      // 4. Insert Stock Movements in Supabase
       const movementInserts = sale.items.map(item => ({
         store_id: storeId,
         article_code: item.code,
         movement_type: 'Egreso',
         qty: item.qty,
-        notes: `Venta POS (Offline Sync ID: ${sale.id.slice(0, 8)}) - ${sale.payment_method}`,
+        notes: `Venta POS (Ticket: ${sale.id}) - ${sale.payment_method}`,
         user_email: sale.cashier_email,
-        created_at: sale.created_at
+        created_at: sale.created_at || new Date().toISOString()
       }));
 
       const { error: moveErr } = await supabase
@@ -223,7 +333,7 @@ export const syncOfflineSalesWithSupabase = async (storeId: string): Promise<{ s
         console.warn('Error inserting stock movements for offline sale:', moveErr);
       }
 
-      // 2. Update Article Stock
+      // 5. Update Article Stock
       for (const item of sale.items) {
         try {
           const { data: artData } = await supabase

@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTenant } from '../../context/TenantContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { APP_CONFIG } from '../../config/appConfig';
+import { triggerCronSmartAlertsEdgeFunction, runLocalSmartAlertsScan } from '../../services/SmartAlertsService';
 const UserProfileModal = React.lazy(() => import('../Modals/UserProfileModal').then(m => ({ default: m.UserProfileModal })));
 import {
   Search,
@@ -267,14 +268,29 @@ export const Header: React.FC<HeaderProps> = ({
                   <div style={{ fontWeight: 800, fontSize: '0.875rem', color: 'var(--text-main)' }}>
                     🔔 Notificaciones ({notifications.length})
                   </div>
-                  {notifications.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <button
-                      onClick={clearNotifications}
-                      style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+                      onClick={() => {
+                        const targetStoreId = activeStore?.id || 'demo-store';
+                        triggerCronSmartAlertsEdgeFunction(targetStoreId);
+                        runLocalSmartAlertsScan(targetStoreId, (notif) => {
+                          // NotificationContext handles live updates
+                        });
+                      }}
+                      title="Escanear reglas de alerta en vivo"
+                      style={{ background: 'rgba(37, 99, 235, 0.12)', border: 'none', color: '#2563eb', fontSize: '0.72rem', fontWeight: 800, padding: '0.2rem 0.5rem', borderRadius: '0.375rem', cursor: 'pointer' }}
                     >
-                      Limpiar
+                      🤖 Escanear
                     </button>
-                  )}
+                    {notifications.length > 0 && (
+                      <button
+                        onClick={clearNotifications}
+                        style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>

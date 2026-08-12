@@ -20,6 +20,17 @@ import {
   syncOfflineSalesWithSupabase
 } from '../../services/OfflinePOSStore';
 import {
+  fetchCurrencyRates,
+  convertARS,
+  formatCurrencyAmount,
+  DEFAULT_RATES
+} from '../../services/CurrencyService';
+import {
+  Customer,
+  fetchCustomers,
+  updateCustomerPoints
+} from '../../services/CustomerService';
+import {
   X,
   ShoppingCart,
   Barcode,
@@ -104,6 +115,10 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
   const [pendingOfflineCount, setPendingOfflineCount] = useState<number>(0);
   const [isSyncingOffline, setIsSyncingOffline] = useState<boolean>(false);
 
+  // Multi-Currency Real State
+  const [displayCurrency, setDisplayCurrency] = useState<'ARS' | 'USD_OFFICIAL' | 'USD_BLUE' | 'EUR'>('ARS');
+  const [currencyRates, setCurrencyRates] = useState<Record<string, number>>({ ...DEFAULT_RATES });
+
   // State
   const [catalog, setCatalog] = useState<POSArticle[]>([]);
   const [priceLists, setPriceLists] = useState<POSPriceList[]>([]);
@@ -120,8 +135,16 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<'Efectivo' | 'Debito' | 'Credito' | 'QR' | 'CtaCte'>('Efectivo');
   const [cashGivenInput, setCashGivenInput] = useState<string>('');
   const [customerName, setCustomerName] = useState<string>('Consumidor Final');
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [customersList, setCustomersList] = useState<Customer[]>([]);
   const [invoiceType, setInvoiceType] = useState<'Ticket X' | 'Factura A' | 'Factura B'>('Ticket X');
   const [cuitInput, setCuitInput] = useState<string>('');
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchCustomers(activeStore?.id).then(data => setCustomersList(data)).catch(() => {});
+    }
+  }, [isOpen, activeStore]);
 
   // Shift & Cash Register State
   const [registerName, setRegisterName] = useState(() => {
@@ -236,6 +259,8 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
         }
       }
     } catch {}
+
+    fetchCurrencyRates(activeStore?.id).then(setCurrencyRates);
 
     // Load Catalog Articles & Price List Overrides
     try {
@@ -556,6 +581,7 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
         id: ticketNumber,
         store_id: activeStore?.id || 'demo-store',
         cashier_email: user?.email || cashierName,
+        customer_id: selectedCustomerId || undefined,
         customer_name: customerName,
         invoice_type: invoiceType,
         payment_method: paymentMethod,
@@ -571,6 +597,14 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
         })),
         created_at: new Date().toISOString()
       });
+
+      // Award loyalty points (1 point per $1000 spent)
+      if (selectedCustomerId) {
+        const pointsEarned = Math.floor(finalTotal / 1000);
+        if (pointsEarned > 0) {
+          updateCustomerPoints(selectedCustomerId, activeStore?.id || 'demo-store', pointsEarned).catch(() => {});
+        }
+      }
 
       if (navigator.onLine && activeStore?.id) {
         syncOfflineSalesWithSupabase(activeStore.id);
@@ -779,6 +813,51 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {/* Multi-Currency Rate Ticker Badge */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            background: 'rgba(15, 23, 42, 0.8)',
+            border: '1px solid #3b82f6',
+            borderRadius: '0.5rem',
+            padding: '0.35rem 0.75rem',
+            fontSize: '0.75rem',
+            fontWeight: 800,
+            color: '#38bdf8'
+          }}>
+            <span>💵 USD: ${currencyRates.USD_OFFICIAL || 1250}</span>
+            <span style={{ color: '#94a3b8' }}>|</span>
+            <span>🔵 Blue: ${currencyRates.USD_BLUE || 1380}</span>
+            <span style={{ color: '#94a3b8' }}>|</span>
+            <span>💶 EUR: ${currencyRates.EUR || 1420}</span>
+          </div>
+
+          {/* Currency Display Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#1e293b', padding: '0.35rem 0.75rem', borderRadius: '0.5rem', border: '1px solid #334155' }}>
+            <DollarSign size={16} style={{ color: '#10b981' }} />
+            <span style={{ fontSize: '0.78125rem', fontWeight: 800, color: '#94a3b8' }}>Moneda:</span>
+            <select
+              value={displayCurrency}
+              onChange={(e) => setDisplayCurrency(e.target.value as any)}
+              style={{
+                background: '#0f172a',
+                border: '1px solid #10b981',
+                color: '#10b981',
+                fontWeight: 900,
+                fontSize: '0.85rem',
+                borderRadius: '0.375rem',
+                padding: '0.35rem 0.6rem',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="ARS">🇦🇷 ARS ($)</option>
+              <option value="USD_OFFICIAL">🇺🇸 USD Oficial</option>
+              <option value="USD_BLUE">🇺🇸 USD Blue</option>
+              <option value="EUR">🇪🇺 EUR (€)</option>
+            </select>
+          </div>
+
           {/* Price List Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#1e293b', padding: '0.35rem 0.75rem', borderRadius: '0.5rem', border: '1px solid #334155' }}>
             <Tag size={16} style={{ color: '#a855f7' }} />
@@ -1048,8 +1127,35 @@ export const POSTerminalModal: React.FC<POSTerminalModalProps> = ({
           {/* Ticket Type & Customer */}
           <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '0.75rem', padding: '0.875rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>
-              Tipo de Comprobante
+              Cliente & Comprobante
             </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '0.25rem' }}>Cliente Registrado:</label>
+              <select
+                value={selectedCustomerId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedCustomerId(id);
+                  const found = customersList.find(c => c.id === id);
+                  if (found) {
+                    setCustomerName(found.name);
+                    if (found.cuit) setCuitInput(found.cuit);
+                  } else {
+                    setCustomerName('Consumidor Final');
+                  }
+                }}
+                style={{ width: '100%', padding: '0.45rem 0.6rem', borderRadius: '0.375rem', border: '1px solid #334155', background: '#1e293b', color: '#ffffff', fontSize: '0.8125rem' }}
+              >
+                <option value="">👤 Consumidor Final</option>
+                {customersList.map(c => (
+                  <option key={c.id} value={c.id}>
+                    👤 {c.name} ({c.code}) {c.balance > 0 ? `[Deuda: $${c.balance}]` : ''} [{c.loyalty_points || 0} pts]
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
               {(['Ticket X', 'Factura B', 'Factura A'] as const).map(t => (
                 <button

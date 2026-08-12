@@ -16,8 +16,11 @@ import {
   FileSpreadsheet,
   CheckSquare,
   Square,
-  ArrowUpDown
+  ArrowUpDown,
+  Sparkles
 } from 'lucide-react';
+
+const AIPriceRecommendationsModal = React.lazy(() => import('./AIPriceRecommendationsModal').then(m => ({ default: m.AIPriceRecommendationsModal })));
 
 export interface PriceList {
   id: string;
@@ -55,6 +58,7 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
   const [priceListSortBy, setPriceListSortBy] = useState<'CODE_ASC' | 'NAME_ASC' | 'NAME_DESC' | 'DISCOUNT_DESC'>('CODE_ASC');
   const [editingList, setEditingList] = useState<Partial<PriceList> | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [showAIModal, setShowAIModal] = useState(false);
 
   // Storage key for per-store persistence
   const storeKey = activeStore?.id || 'demo-store';
@@ -509,6 +513,27 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
                 <option value="DISCOUNT_DESC">💲 Mayor Descuento %</option>
               </select>
             </div>
+
+            <button
+              onClick={() => setShowAIModal(true)}
+              title="Obtener sugerencias inteligentes de precios impulsadas por IA"
+              style={{
+                padding: '0.4rem 1rem',
+                borderRadius: '0.5rem',
+                border: 'none',
+                background: 'linear-gradient(135deg, #0284c7 0%, #0f172a 100%)',
+                color: '#ffffff',
+                fontSize: '0.78125rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                boxShadow: '0 2px 8px rgba(2, 132, 199, 0.25)'
+              }}
+            >
+              <Sparkles size={15} style={{ color: '#38bdf8' }} /> Asistente IA Precios
+            </button>
 
             <button
               onClick={handleDownloadTemplate}
@@ -973,6 +998,15 @@ export const PriceListsModal: React.FC<PriceListsModalProps> = ({ isOpen, onClos
           </button>
         </div>
       </div>
+
+      {showAIModal && (
+        <React.Suspense fallback={null}>
+          <AIPriceRecommendationsModal
+            isOpen={true}
+            onClose={() => setShowAIModal(false)}
+          />
+        </React.Suspense>
+      )}
     </div>
   );
 };

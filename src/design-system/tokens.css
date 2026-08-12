@@ -1,0 +1,128 @@
+/* Design System Tokens — PickingUp! Enterprise Retail Systems */
+
+:root {
+  /* Typography Tokens */
+  --ds-font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  
+  --ds-font-size-xs: 0.75rem;    /* 12px */
+  --ds-font-size-sm: 0.8125rem;  /* 13px */
+  --ds-font-size-md: 0.875rem;   /* 14px */
+  --ds-font-size-lg: 1rem;       /* 16px */
+  --ds-font-size-xl: 1.25rem;    /* 20px */
+  --ds-font-size-2xl: 1.5rem;    /* 24px */
+  --ds-font-size-3xl: 2rem;      /* 32px */
+
+  --ds-font-weight-regular: 400;
+  --ds-font-weight-medium: 500;
+  --ds-font-weight-semibold: 600;
+  --ds-font-weight-bold: 700;
+  --ds-font-weight-extrabold: 800;
+  --ds-font-weight-black: 900;
+
+  /* Spacing Tokens */
+  --ds-space-05: 0.125rem; /* 2px */
+  --ds-space-1: 0.25rem;   /* 4px */
+  --ds-space-2: 0.5rem;    /* 8px */
+  --ds-space-3: 0.75rem;   /* 12px */
+  --ds-space-4: 1rem;      /* 16px */
+  --ds-space-5: 1.25rem;   /* 20px */
+  --ds-space-6: 1.5rem;    /* 24px */
+  --ds-space-8: 2rem;      /* 32px */
+  --ds-space-10: 2.5rem;   /* 40px */
+  --ds-space-12: 3rem;      /* 48px */
+
+  /* Border Radius Tokens */
+  --ds-radius-xs: 0.25rem;  /* 4px */
+  --ds-radius-sm: 0.375rem; /* 6px */
+  --ds-radius-md: 0.5rem;   /* 8px */
+  --ds-radius-lg: 0.75rem;  /* 12px */
+  --ds-radius-xl: 1rem;     /* 16px */
+  --ds-radius-full: 9999px;
+
+  /* Elevation & Shadow Tokens */
+  --ds-shadow-sm: 0 2px 8px rgba(99, 102, 241, 0.04);
+  --ds-shadow-md: 0 10px 25px -5px rgba(99, 102, 241, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.03);
+  --ds-shadow-lg: 0 20px 35px -10px rgba(99, 102, 241, 0.12);
+  --ds-shadow-glow: 0 0 20px rgba(79, 70, 229, 0.25);
+
+  /* Status Colors & Tints */
+  --ds-status-success: #10b981;
+  --ds-status-success-bg: rgba(16, 185, 129, 0.12);
+  --ds-status-success-border: rgba(16, 185, 129, 0.3);
+
+  --ds-status-warning: #f59e0b;
+  --ds-status-warning-bg: rgba(245, 158, 11, 0.12);
+  --ds-status-warning-border: rgba(245, 158, 11, 0.3);
+
+  --ds-status-error: #ef4444;
+  --ds-status-error-bg: rgba(239, 68, 68, 0.12);
+  --ds-status-error-border: rgba(239, 68, 68, 0.3);
+
+  --ds-status-info: #3b82f6;
+  --ds-status-info-bg: rgba(59, 130, 246, 0.12);
+  --ds-status-info-border: rgba(59, 130, 246, 0.3);
+
+  --ds-status-purple: #8b5cf6;
+  --ds-status-purple-bg: rgba(139, 92, 246, 0.12);
+  --ds-status-purple-border: rgba(139, 92, 246, 0.3);
+
+  --ds-status-neutral: #64748b;
+  --ds-status-neutral-bg: rgba(100, 116, 139, 0.12);
+  --ds-status-neutral-border: rgba(100, 116, 139, 0.3);
+
+  /* Transitions */
+  --ds-transition-fast: 0.15s ease;
+  --ds-transition-normal: 0.25s ease;
+  --ds-transition-slow: 0.4s ease;
+}
+
+/* Responsive Touch Target Tokens & Mobile Rules */
+@media (max-width: 768px) {
+  :root {
+    --ds-space-4: 0.75rem;
+    --ds-space-6: 1rem;
+  }
+
+  /* Fullscreen Modal Containers on Mobile */
+  .modal-responsive-container {
+    padding: 0 !important;
+    align-items: flex-end !important;
+  }
+
+  .modal-responsive-card {
+    border-radius: 1.25rem 1.25rem 0 0 !important;
+    max-height: 94vh !important;
+    width: 100% !important;
+  }
+
+  /* Touch Targets 44px min-height for Cashier Touch Tablets & Mobile */
+  button, input, select, textarea {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  /* Compact Grids */
+  .grid-responsive-2col,
+  .grid-responsive-3col,
+  .grid-responsive-4col {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Accessibility (a11y) WCAG AA Focus Indicators & Screen Reader Utilities */
+:focus-visible {
+  outline: 2px solid var(--brand-blue, #4f46e5) !important;
+  outline-offset: 2px !important;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border-width: 0 !important;
+}

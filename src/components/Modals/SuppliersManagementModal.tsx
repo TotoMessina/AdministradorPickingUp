@@ -3,6 +3,7 @@ import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { supabase, isValidUUID } from '../../lib/supabase';
+import { fetchCurrencyRates, formatCurrencyAmount, DEFAULT_RATES } from '../../services/CurrencyService';
 import {
   X,
   Plus,
@@ -131,9 +132,13 @@ export const SuppliersManagementModal: React.FC<SuppliersManagementModalProps> =
     notes: ''
   });
 
+  const [currencyRates, setCurrencyRates] = useState<Record<string, number>>({ ...DEFAULT_RATES });
+  const [selectedCurrencyCode, setSelectedCurrencyCode] = useState<'ARS' | 'USD_OFFICIAL' | 'USD_BLUE' | 'EUR'>('ARS');
+
   useEffect(() => {
     if (isOpen) {
       loadData();
+      fetchCurrencyRates(activeStore?.id).then(setCurrencyRates);
     }
   }, [isOpen, activeStore]);
 

@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 import { useTenant } from './TenantContext';
 import { supabase, isValidUUID } from '../lib/supabase';
+import { subscribeAlertsLive } from '../services/RealtimeMultiStoreService';
+import { triggerCronSmartAlertsEdgeFunction, runLocalSmartAlertsScan } from '../services/SmartAlertsService';
 
 export interface NotificationItem {
   id: string;
@@ -150,6 +152,30 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   useEffect(() => {
     fetchNotifications();
+
+    if (activeStore && isValidUUID(activeStore.id) && user && !isDemoMode) {
+      triggerCronSmartAlertsEdgeFunction(activeStore.id);
+
+      const channel = subscribeAlertsLive(activeStore.id, user.id, (newNotif: any) => {
+        if (newNotif) {
+          const item: NotificationItem = {
+            id: newNotif.id || 'realtime-' + Date.now(),
+            store_id: newNotif.store_id,
+            user_id: newNotif.user_id,
+            title: newNotif.title || 'Alerta Realtime',
+            message: newNotif.message || '',
+            type: newNotif.type || 'info',
+            is_read: false,
+            created_at: newNotif.created_at || new Date().toISOString()
+          };
+          setNotifications(prev => [item, ...prev]);
+        }
+      });
+
+      return () => {
+        if (channel) supabase.removeChannel(channel);
+      };
+    }
   }, [user, activeStore, isDemoMode]);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;

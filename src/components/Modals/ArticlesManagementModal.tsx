@@ -15,12 +15,14 @@ import {
   Filter,
   AlertTriangle,
   Download,
+  Upload,
   RotateCcw,
   Save,
   DollarSign,
   Info,
   ArrowUpDown
 } from 'lucide-react';
+import { BulkArticleImportModal } from './BulkArticleImportModal';
 
 export interface ArticleItem {
   id?: string;
@@ -79,12 +81,28 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
   const [newCategoryInput, setNewCategoryInput] = useState('');
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'CRITICAL' | 'NO_PRICE'>('ALL');
   const [sortBy, setSortBy] = useState<'MODIFIED_DESC' | 'NAME_ASC' | 'NAME_DESC' | 'CREATED_DESC' | 'PRICE_ASC' | 'PRICE_DESC' | 'STOCK_ASC' | 'STOCK_DESC'>('MODIFIED_DESC');
 
+  // Server-Side Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [totalCount, setTotalCount] = useState<number>(0);
+
+  // Debounce search input (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   // Modal Form State (Create / Edit Article)
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [editingArticle, setEditingArticle] = useState<ArticleItem | null>(null);
   const [formData, setFormData] = useState<ArticleItem>({
     code: '',
@@ -106,14 +124,17 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
     if (isOpen) {
       loadPriceListsAndArticles();
     }
-  }, [isOpen, activeStore]);
+  }, [isOpen, activeStore, currentPage, pageSize, debouncedSearch, selectedCategory, activeTab, sortBy]);
+
+  const isValidUUID = (uuid: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
 
   const loadPriceListsAndArticles = async () => {
     setLoading(true);
     let loadedLists: PriceListSimple[] = [{ id: 'base', code: 1, name: 'Lista Base (Predeterminada)', is_default: true }];
     let loadedArticles: ArticleItem[] = [];
+    let recordCount = 0;
 
-    // 1. Load Price Lists from localStorage & DB
+    // 1. Load Price Lists from DB / localStorage
     try {
       const rawLists = localStorage.getItem(`pickingup_pricelists_${storeKey}`);
       if (rawLists) {
@@ -129,7 +150,7 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
       }
     } catch {}
 
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
       try {
         const { data: dbLists } = await supabase
           .from('price_lists')
@@ -149,53 +170,49 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
     }
     setPriceLists(loadedLists);
 
-    // 2. Load Articles & Price List Items
-    try {
-      const rawLocal = localStorage.getItem(`pickingup_prodprices_${storeKey}`);
-      if (rawLocal) {
-        const parsed = JSON.parse(rawLocal);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          loadedArticles = parsed.map((p: any) => ({
-            id: p.id || p.code,
-            code: p.code,
-            barcode: p.barcode || p.code,
-            description: p.description,
-            category: p.category || 'General',
-            family: p.family || 'General',
-            subfamily: p.subfamily || 'General',
-            price: p.base_price ?? p.price ?? 0,
-            cost: p.cost ?? 0,
-            stock: p.stock ?? 0,
-            min_stock: p.min_stock ?? 5,
-            is_active: p.is_active !== undefined ? p.is_active : true,
-            is_priority_pricing: p.is_priority_pricing || false,
-            custom_prices: p.custom_prices || {},
-            created_at: p.created_at
-          }));
-        }
-      }
-    } catch {}
+    // 2. Server-Side Paginated Query (.range(from, to)) with count: 'exact'
+    const from = (currentPage - 1) * pageSize;
+    const to = from + pageSize - 1;
 
-    if (user && !isDemoMode && activeStore) {
+    if (user && !isDemoMode && activeStore && isValidUUID(activeStore.id)) {
       try {
-        const { data: dbArticles } = await supabase
+        let query = supabase
           .from('articles')
-          .select('*')
+          .select('*', { count: 'exact' })
           .eq('store_id', activeStore.id)
-          .order('created_at', { ascending: false });
+          .eq('is_active', activeTab !== 'deactivated');
 
-        if (dbArticles && dbArticles.length > 0) {
+        if (debouncedSearch.trim()) {
+          const term = `%${debouncedSearch.trim()}%`;
+          query = query.or(`description.ilike.${term},code.ilike.${term},barcode.ilike.${term},category.ilike.${term}`);
+        }
+
+        if (selectedCategory !== 'ALL') {
+          query = query.eq('category', selectedCategory);
+        }
+
+        if (sortBy === 'NAME_ASC') query = query.order('description', { ascending: true });
+        else if (sortBy === 'NAME_DESC') query = query.order('description', { ascending: false });
+        else query = query.order('created_at', { ascending: false });
+
+        const { data: dbArticles, count, error } = await query.range(from, to);
+
+        if (!error && dbArticles) {
+          recordCount = count || dbArticles.length;
           const articleCodes = dbArticles.map(a => a.code);
-          const { data: priceItems } = await supabase
-            .from('price_list_items')
-            .select('price_list_id, article_code, custom_price')
-            .in('article_code', articleCodes);
-
           const priceMap: Record<string, Record<string, number>> = {};
-          (priceItems || []).forEach((item: any) => {
-            if (!priceMap[item.article_code]) priceMap[item.article_code] = {};
-            priceMap[item.article_code][item.price_list_id] = Number(item.custom_price) || 0;
-          });
+
+          if (articleCodes.length > 0) {
+            const { data: priceItems } = await supabase
+              .from('price_list_items')
+              .select('price_list_id, article_code, custom_price')
+              .in('article_code', articleCodes);
+
+            (priceItems || []).forEach((item: any) => {
+              if (!priceMap[item.article_code]) priceMap[item.article_code] = {};
+              priceMap[item.article_code][item.price_list_id] = Number(item.custom_price) || 0;
+            });
+          }
 
           loadedArticles = dbArticles.map((d: any) => ({
             id: d.id,
@@ -216,11 +233,45 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
           }));
         }
       } catch (err) {
-        console.error('Error fetching articles from DB:', err);
+        console.error('Error fetching paginated articles from DB:', err);
       }
+    } else {
+      // Offline Local Storage Fallback with client pagination simulation
+      try {
+        const rawLocal = localStorage.getItem(`pickingup_prodprices_${storeKey}`);
+        if (rawLocal) {
+          const parsed = JSON.parse(rawLocal);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            let filtered = parsed.filter((p: any) => (activeTab === 'deactivated' ? !p.is_active : (p.is_active !== false)));
+            if (debouncedSearch.trim()) {
+              const term = debouncedSearch.toLowerCase();
+              filtered = filtered.filter((p: any) => (p.description || '').toLowerCase().includes(term) || (p.code || '').toLowerCase().includes(term));
+            }
+            recordCount = filtered.length;
+            loadedArticles = filtered.slice(from, to + 1).map((p: any) => ({
+              id: p.id || p.code,
+              code: p.code,
+              barcode: p.barcode || p.code,
+              description: p.description,
+              category: p.category || 'General',
+              family: p.family || 'General',
+              subfamily: p.subfamily || 'General',
+              price: p.base_price ?? p.price ?? 0,
+              cost: p.cost ?? 0,
+              stock: p.stock ?? 0,
+              min_stock: p.min_stock ?? 5,
+              is_active: p.is_active !== undefined ? p.is_active : true,
+              is_priority_pricing: p.is_priority_pricing || false,
+              custom_prices: p.custom_prices || {},
+              created_at: p.created_at
+            }));
+          }
+        }
+      } catch {}
     }
 
     setArticles(loadedArticles);
+    setTotalCount(recordCount);
 
     const uniqueCats = Array.from(new Set([...categories, ...loadedArticles.map(a => a.category).filter(Boolean)]));
     setCategories(uniqueCats);
@@ -577,6 +628,27 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button
+              onClick={() => setIsBulkImportOpen(true)}
+              title="Importar catálogo masivo desde CSV o Excel con mapeo dinámico"
+              style={{
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                border: 'none',
+                borderRadius: '0.5rem',
+                padding: '0.5rem 0.875rem',
+                color: '#ffffff',
+                fontWeight: 800,
+                fontSize: '0.8125rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)'
+              }}
+            >
+              <Upload size={15} /> Importación Masiva
+            </button>
+
             <button
               onClick={handleExportCSV}
               style={{
@@ -1024,6 +1096,133 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              {/* SERVER-SIDE PAGINATION CONTROLS BAR */}
+              <div style={{
+                padding: '0.75rem 1.5rem',
+                borderTop: '1px solid var(--border-light)',
+                background: 'var(--bg-surface)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '1rem',
+                flexWrap: 'wrap'
+              }}>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                  {totalCount > 0 ? (
+                    <>
+                      Mostrando <strong style={{ color: 'var(--text-main)' }}>{Math.min((currentPage - 1) * pageSize + 1, totalCount)}</strong> - <strong style={{ color: 'var(--text-main)' }}>{Math.min(currentPage * pageSize, totalCount)}</strong> de <strong style={{ color: 'var(--text-main)' }}>{totalCount}</strong> artículos
+                    </>
+                  ) : (
+                    'Sin resultados'
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8125rem' }}>
+                    <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>Ítems por página:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      style={{
+                        background: 'var(--bg-app)',
+                        border: '1px solid var(--border-light)',
+                        color: 'var(--text-main)',
+                        borderRadius: '0.375rem',
+                        padding: '0.25rem 0.5rem',
+                        fontWeight: 800,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                      <option value={200}>200</option>
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <button
+                      onClick={() => setCurrentPage(1)}
+                      disabled={currentPage === 1}
+                      title="Primera Página"
+                      style={{
+                        padding: '0.35rem 0.6rem',
+                        borderRadius: '0.375rem',
+                        border: '1px solid var(--border-light)',
+                        background: currentPage === 1 ? 'var(--bg-app)' : '#2563eb',
+                        color: currentPage === 1 ? 'var(--text-muted)' : '#ffffff',
+                        fontWeight: 800,
+                        fontSize: '0.75rem',
+                        cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      ⏮️ Primera
+                    </button>
+
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      title="Página Anterior"
+                      style={{
+                        padding: '0.35rem 0.6rem',
+                        borderRadius: '0.375rem',
+                        border: '1px solid var(--border-light)',
+                        background: currentPage === 1 ? 'var(--bg-app)' : '#2563eb',
+                        color: currentPage === 1 ? 'var(--text-muted)' : '#ffffff',
+                        fontWeight: 800,
+                        fontSize: '0.75rem',
+                        cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      ◀️ Anterior
+                    </button>
+
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 800, color: 'var(--text-main)', padding: '0 0.5rem' }}>
+                      Página {currentPage} de {Math.max(1, Math.ceil(totalCount / pageSize))}
+                    </span>
+
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalCount / pageSize), prev + 1))}
+                      disabled={currentPage >= Math.ceil(totalCount / pageSize)}
+                      title="Página Siguiente"
+                      style={{
+                        padding: '0.35rem 0.6rem',
+                        borderRadius: '0.375rem',
+                        border: '1px solid var(--border-light)',
+                        background: currentPage >= Math.ceil(totalCount / pageSize) ? 'var(--bg-app)' : '#2563eb',
+                        color: currentPage >= Math.ceil(totalCount / pageSize) ? 'var(--text-muted)' : '#ffffff',
+                        fontWeight: 800,
+                        fontSize: '0.75rem',
+                        cursor: currentPage >= Math.ceil(totalCount / pageSize) ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      Siguiente ▶️
+                    </button>
+
+                    <button
+                      onClick={() => setCurrentPage(Math.ceil(totalCount / pageSize))}
+                      disabled={currentPage >= Math.ceil(totalCount / pageSize)}
+                      title="Última Página"
+                      style={{
+                        padding: '0.35rem 0.6rem',
+                        borderRadius: '0.375rem',
+                        border: '1px solid var(--border-light)',
+                        background: currentPage >= Math.ceil(totalCount / pageSize) ? 'var(--bg-app)' : '#2563eb',
+                        color: currentPage >= Math.ceil(totalCount / pageSize) ? 'var(--text-muted)' : '#ffffff',
+                        fontWeight: 800,
+                        fontSize: '0.75rem',
+                        cursor: currentPage >= Math.ceil(totalCount / pageSize) ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      Última ⏭️
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1498,6 +1697,23 @@ export const ArticlesManagementModal: React.FC<ArticlesManagementModalProps> = (
             </form>
           </div>
         </div>
+      )}
+
+      {/* Bulk Article Import Wizard Modal */}
+      {isBulkImportOpen && (
+        <BulkArticleImportModal
+          isOpen={true}
+          onClose={() => setIsBulkImportOpen(false)}
+          existingArticles={articles}
+          onImportComplete={() => {
+            setIsBulkImportOpen(false);
+            // Refresh local state list
+            try {
+              const raw = localStorage.getItem(`pickingup_articles_${storeKey}`);
+              if (raw) setArticles(JSON.parse(raw));
+            } catch {}
+          }}
+        />
       )}
     </div>
   );
