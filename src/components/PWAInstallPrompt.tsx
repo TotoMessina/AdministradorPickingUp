@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Download, X, Smartphone, Share, PlusSquare, CheckCircle2, Sparkles } from 'lucide-react';
+import { Download, X, Smartphone, Share, PlusSquare, CheckCircle2, Sparkles, Bell } from 'lucide-react';
+import { requestNotificationPermission, sendLocalNotification } from '../services/PushNotificationService';
 
 export const PWAInstallPrompt: React.FC = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -48,13 +49,21 @@ export const PWAInstallPrompt: React.FC = () => {
   }, []);
 
   const handleInstallClick = async () => {
+    // Request Native Push Notification Permissions
+    try {
+      const perm = await requestNotificationPermission();
+      if (perm === 'granted') {
+        sendLocalNotification('PickingUp! POS Enterprise', 'Notificaciones emergentes y alertas activadas correctamente.');
+      }
+    } catch {}
+
     if (isIOS) {
       setShowIOSInstructions(true);
       return;
     }
 
     if (!deferredPrompt) {
-      alert('Para instalar en Android/Desktop: Abrí el menú del navegador y seleccioná "Agregar a pantalla de inicio" o "Instalar Aplicación".');
+      alert('Para instalar en Android/Desktop: Abrí el menú del navegador (3 puntos) y seleccioná "Agregar a pantalla de inicio" o "Instalar Aplicación".');
       return;
     }
 
