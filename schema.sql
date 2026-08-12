@@ -604,6 +604,7 @@ CREATE TABLE IF NOT EXISTS public.cash_registers (
     code TEXT NOT NULL,
     name TEXT NOT NULL,
     cashier_name TEXT,
+    cashier_email TEXT,
     version TEXT DEFAULT 'v10.3.20 (iPOS-Android)',
     default_price_list_name TEXT DEFAULT 'Lista Base',
     allowed_price_list_names TEXT[] DEFAULT ARRAY['Lista Base'],

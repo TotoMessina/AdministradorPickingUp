@@ -24,6 +24,8 @@ export interface ConfiguredCashRegister {
   code: string;
   name: string;
   cashierName: string;
+  cashierEmail?: string;
+  cashierPassword?: string;
   version: string;
   defaultPriceListName: string;
   allowedPriceListNames: string[];
@@ -114,6 +116,7 @@ export const CashRegisterConfigModal: React.FC<CashRegisterConfigModalProps> = (
             code: d.code,
             name: d.name,
             cashierName: d.cashier_name || 'Operador General',
+            cashierEmail: d.cashier_email || '',
             version: d.version || 'v10.3.20 (iPOS-Android)',
             defaultPriceListName: d.default_price_list_name || 'Lista Base',
             allowedPriceListNames: d.allowed_price_list_names || [d.default_price_list_name || 'Lista Base'],
@@ -164,6 +167,8 @@ export const CashRegisterConfigModal: React.FC<CashRegisterConfigModalProps> = (
         code: editingReg.code.trim(),
         name: editingReg.name.trim().toUpperCase(),
         cashierName: editingReg.cashierName?.trim() || 'Operador General',
+        cashierEmail: editingReg.cashierEmail?.trim() || '',
+        cashierPassword: editingReg.cashierPassword?.trim() || '',
         version: editingReg.version?.trim() || 'v10.3.20 (iPOS-Android)',
         defaultPriceListName: defName,
         allowedPriceListNames: allowed,
@@ -174,6 +179,48 @@ export const CashRegisterConfigModal: React.FC<CashRegisterConfigModalProps> = (
 
     saveRegistersToStorage(updated);
 
+    // Sync Cashier User account for Login
+    if (editingReg.cashierEmail && editingReg.cashierEmail.includes('@')) {
+      const cEmail = editingReg.cashierEmail.trim().toLowerCase();
+      const cPass = editingReg.cashierPassword?.trim() || 'cajero123';
+      const cName = editingReg.cashierName?.trim() || editingReg.name;
+
+      const newCashierUser = {
+        id: `caj-${Date.now()}`,
+        email: cEmail,
+        password: cPass,
+        fullName: cName,
+        assignedRegisterName: editingReg.name.trim().toUpperCase(),
+        defaultPriceListName: defName,
+        role: 'cajero',
+        created_at: new Date().toISOString()
+      };
+
+      try {
+        const rawStoreCashiers = localStorage.getItem(`pickingup_cashiers_${storeKey}`);
+        let storeCashiers = rawStoreCashiers ? JSON.parse(rawStoreCashiers) : [];
+        const existingIdx = storeCashiers.findIndex((c: any) => c.email.toLowerCase() === cEmail);
+        if (existingIdx >= 0) {
+          storeCashiers[existingIdx] = { ...storeCashiers[existingIdx], ...newCashierUser };
+        } else {
+          storeCashiers.push(newCashierUser);
+        }
+        localStorage.setItem(`pickingup_cashiers_${storeKey}`, JSON.stringify(storeCashiers));
+
+        const rawGlobalCashiers = localStorage.getItem('pickingup_cashiers_global');
+        let globalCashiers = rawGlobalCashiers ? JSON.parse(rawGlobalCashiers) : [];
+        const globalIdx = globalCashiers.findIndex((c: any) => c.email.toLowerCase() === cEmail);
+        if (globalIdx >= 0) {
+          globalCashiers[globalIdx] = { ...globalCashiers[globalIdx], ...newCashierUser };
+        } else {
+          globalCashiers.push(newCashierUser);
+        }
+        localStorage.setItem('pickingup_cashiers_global', JSON.stringify(globalCashiers));
+      } catch (err) {
+        console.error('Error saving cashier login user:', err);
+      }
+    }
+
     // Save to Supabase DB if logged in
     if (user && !isDemoMode && activeStore) {
       try {
@@ -182,6 +229,7 @@ export const CashRegisterConfigModal: React.FC<CashRegisterConfigModalProps> = (
           code: editingReg.code,
           name: editingReg.name.trim().toUpperCase(),
           cashier_name: editingReg.cashierName || 'Operador General',
+          cashier_email: editingReg.cashierEmail?.trim() || null,
           version: editingReg.version || 'v10.3.20 (iPOS-Android)',
           default_price_list_name: defName,
           allowed_price_list_names: allowed,
@@ -391,6 +439,49 @@ export const CashRegisterConfigModal: React.FC<CashRegisterConfigModalProps> = (
                     background: 'var(--bg-surface)',
                     color: 'var(--text-main)',
                     fontSize: '0.85rem'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78125rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                  Email de Acceso del Cajero (Login)
+                </label>
+                <input
+                  type="email"
+                  placeholder="ej. cajero1@mi-comercio.com"
+                  value={editingReg?.cashierEmail || ''}
+                  onChange={(e) => setEditingReg({ ...editingReg, cashierEmail: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '0.5rem',
+                    border: '1px solid var(--border-light)',
+                    background: 'var(--bg-surface)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78125rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                  Contraseña de Login para la Caja / Cajero
+                </label>
+                <input
+                  type="password"
+                  placeholder="ej. cajero123"
+                  value={editingReg?.cashierPassword || ''}
+                  onChange={(e) => setEditingReg({ ...editingReg, cashierPassword: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '0.5rem',
+                    border: '1px solid var(--border-light)',
+                    background: 'var(--bg-surface)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem',
+                    fontFamily: 'monospace'
                   }}
                 />
               </div>
@@ -640,8 +731,15 @@ export const CashRegisterConfigModal: React.FC<CashRegisterConfigModalProps> = (
                       </td>
 
                       <td style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                          <User size={13} /> {reg.cashierName}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-main)', fontWeight: 700 }}>
+                            <User size={13} /> {reg.cashierName}
+                          </span>
+                          {reg.cashierEmail && (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                              ✉️ {reg.cashierEmail}
+                            </span>
+                          )}
                         </div>
                       </td>
 
